@@ -13,7 +13,7 @@
         <TextView
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:text="AppCel"
+            android:text="Limit"
             android:textColor="@color/brand"
             android:textSize="28sp"
             android:textStyle="bold" />
@@ -115,7 +115,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
             android:lineSpacingExtra="3dp"
-            android:text="1. Tocá «Abrir Accesibilidad», buscá AppCel en «Apps instaladas» o «Servicios descargados» y activala.\n\n2. Si Android dice «Configuración restringida» o no te deja activarla: tocá «Abrir info de la app», después el menú ⋮ de arriba a la derecha → «Permitir configuración restringida». Volvé al paso 1."
+            android:text="1. Tocá «Abrir Accesibilidad», buscá Limit en «Apps instaladas» o «Servicios descargados» y activala.\n\n2. Si Android dice «Configuración restringida» o no te deja activarla: tocá «Abrir info de la app», después el menú ⋮ de arriba a la derecha → «Permitir configuración restringida». Volvé al paso 1."
             android:textColor="@android:color/black"
             android:textSize="14sp" />
 
@@ -176,7 +176,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
-            android:text="AppCel solo mira los botones de las pestañas de Instagram (Reels) y X (Para ti / Siguiendo) para saber cuál está seleccionada. No lee publicaciones ni mensajes, no guarda nada de lo que ves y no usa internet."
+            android:text="Limit solo mira los botones de las pestañas de Instagram (Reels) y X (Para ti / Siguiendo) para saber cuál está seleccionada. No lee publicaciones ni mensajes, no guarda nada de lo que ves y no usa internet."
             android:textColor="@color/muted"
             android:textSize="13sp" />
     </LinearLayout>

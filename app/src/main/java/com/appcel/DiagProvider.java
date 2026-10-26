@@ -33,7 +33,7 @@ public class DiagProvider extends ContentProvider {
     public Cursor query(Uri uri, String[] projection, String selection, String[] args, String sort) {
         File f = Diag.file(getContext());
         MatrixCursor c = new MatrixCursor(new String[]{OpenableColumns.DISPLAY_NAME, OpenableColumns.SIZE});
-        c.addRow(new Object[]{"diagnostico-appcel.txt", f.length()});
+        c.addRow(new Object[]{"diagnostico-limit.txt", f.length()});
         return c;
     }
 

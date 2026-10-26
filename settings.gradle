@@ -14,5 +14,5 @@ dependencyResolutionManagement {
     }
 }
 
-rootProject.name = "AppCel"
+rootProject.name = "Limit"
 include ':app'

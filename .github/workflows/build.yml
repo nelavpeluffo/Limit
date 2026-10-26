@@ -30,8 +30,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          cp app/build/outputs/apk/release/app-release.apk AppCel.apk
-          gh release create "v1.0.${{ github.run_number }}" AppCel.apk \
-            --title "AppCel v1.0.${{ github.run_number }}" \
-            --notes "Descargá **AppCel.apk** desde el celular e instalalo. Las versiones nuevas se instalan encima de la anterior." \
+          cp app/build/outputs/apk/release/app-release.apk Limit.apk
+          gh release create "v1.0.${{ github.run_number }}" Limit.apk \
+            --title "Limit v1.0.${{ github.run_number }}" \
+            --notes "Descargá **Limit.apk** desde el celular e instalalo. Las versiones nuevas se instalan encima de la anterior." \
             --latest

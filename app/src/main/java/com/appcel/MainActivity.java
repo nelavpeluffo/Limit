@@ -105,7 +105,7 @@ public class MainActivity extends Activity {
         Intent send = new Intent(Intent.ACTION_SEND)
                 .setType("text/plain")
                 .putExtra(Intent.EXTRA_STREAM, uri)
-                .putExtra(Intent.EXTRA_SUBJECT, "Diagnóstico AppCel")
+                .putExtra(Intent.EXTRA_SUBJECT, "Diagnóstico Limit")
                 .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
         send.setClipData(ClipData.newRawUri("diagnostico", uri));
         startActivity(Intent.createChooser(send, "Enviar diagnóstico"));
