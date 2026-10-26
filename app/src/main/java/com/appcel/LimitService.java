@@ -54,6 +54,8 @@ public class LimitService extends AccessibilityService {
     private Cover cover;
     private long searchFlowUntil;
     private long exploreRedirectUntil;
+    private boolean xCovered;
+    private long xCoveredSince;
     private long lastExploreCheck;
     // Última sección de Instagram vista con la barra de abajo (lupa, reels u otra).
     private String igSection = "otra";
@@ -158,6 +160,7 @@ public class LimitService extends AccessibilityService {
         blocker.hide();
         searchBlocker.hide();
         cover.hide();
+        xCovered = false;
         cancelNotice();
         overlay.hide();
     }
@@ -235,7 +238,16 @@ public class LimitService extends AccessibilityService {
         long now = SystemClock.elapsedRealtime();
         if (now - lastQuickCheck < 150) return;
         lastQuickCheck = now;
-        if (detect() == Kind.FOR_YOU) enforce(Kind.FOR_YOU);
+        Kind k = detect();
+        if (k == Kind.FOR_YOU) enforce(Kind.FOR_YOU);
+        else uncoverX();
+    }
+
+    /** Ya no estás en Para ti: sacar la pantalla del reloj. */
+    private void uncoverX() {
+        if (!xCovered) return;
+        xCovered = false;
+        cover.hide();
     }
 
     /**
@@ -322,6 +334,11 @@ public class LimitService extends AccessibilityService {
             lastTick = now;
             handler.postDelayed(tickRunnable, TICK_MS);
             return;
+        }
+
+        if (xCovered && (k != Kind.FOR_YOU || now - xCoveredSince > 10_000)) {
+            // Saliste de Para ti (o por las dudas, nunca más de 10 s tapado).
+            uncoverX();
         }
 
         if (k != Kind.NONE) {
@@ -454,8 +471,31 @@ public class LimitService extends AccessibilityService {
         List<AccessibilityNodeInfo> homeTab = root.findAccessibilityNodeInfosByViewId(IG_HOME_TAB_ID);
         boolean ok = homeTab != null && !homeTab.isEmpty() && clickUp(homeTab.get(0));
         if (!ok) performGlobalAction(GLOBAL_ACTION_BACK);
-        // El reloj queda un momento para que la transición se vea suave.
-        handler.postDelayed(cover::hide, 900);
+        // El reloj queda hasta confirmar que ya estás en el Inicio.
+        handler.postDelayed(() -> hideCoverWhenHome(0), 200);
+    }
+
+    private void hideCoverWhenHome(int attempt) {
+        try {
+            AccessibilityNodeInfo root = getRootInActiveWindow();
+            CharSequence pkg = root == null ? null : root.getPackageName();
+            if (pkg == null || !IG.contentEquals(pkg)) { cover.hide(); return; }
+            List<AccessibilityNodeInfo> home = root.findAccessibilityNodeInfosByViewId(IG_HOME_TAB_ID);
+            boolean homeSelected = false;
+            if (home != null) for (AccessibilityNodeInfo h : home) {
+                if (h != null && h.isVisibleToUser()) homeSelected |= h.isSelected() || isSelectedDown(h, 2);
+            }
+            if (homeSelected && !exploreGridVisible(root)) {
+                // Un instante más para que el Inicio termine de dibujarse.
+                handler.postDelayed(cover::hide, 250);
+                return;
+            }
+            // Si a los ~1,2 s sigue en la lupa, volver a tocar Inicio.
+            if (attempt == 8 && home != null && !home.isEmpty()) clickUp(home.get(0));
+        } catch (Exception ignored) {
+        }
+        if (attempt < 30) handler.postDelayed(() -> hideCoverWhenHome(attempt + 1), 150);
+        else cover.hide();   // nunca queda tapado más de ~5 s
     }
 
     /**
@@ -695,7 +735,19 @@ public class LimitService extends AccessibilityService {
             return xForYou;
         }
 
-        // Pestañas escondidas (bajaste): reconocer en cuál de los dos timelines estás,
+        // Pestañas escondidas (bajaste): las páginas de X (Para ti, Siguiendo…) están una
+        // al lado de la otra. Si desde la página actual no se puede deslizar hacia la
+        // izquierda, es la primera: Para ti. Funciona aunque hayas cambiado deslizando.
+        if (inTimeline) {
+            AccessibilityNodeInfo pager = findPager(root, screen);
+            if (pager != null) {
+                boolean[] lr = pagerDirections(pager);
+                if (lr[1] && !lr[0]) { setForYou(true); return true; }
+                if (lr[0]) { setForYou(false); return false; }
+            }
+        }
+
+        // Si no: reconocer en cuál de los dos timelines estás,
         // aunque hayas pasado de uno a otro deslizando el dedo.
         if (inTimeline) {
             AccessibilityNodeInfo list = findVerticalList(root, screen);
@@ -894,6 +946,13 @@ public class LimitService extends AccessibilityService {
         if (k == Kind.FOR_YOU) {
             // Pastillita roja al instante; a los 2,5 s pasa a la violeta "Siguiendo".
             if (now >= noticeUntil) startSwitchNotice();
+            // Que no se vea Para ti: pantalla violeta con el reloj mientras te pasa a Siguiendo.
+            if (!xCovered) {
+                xCovered = true;
+                xCoveredSince = now;
+                cover.show();
+                overlay.raise();
+            }
             if (root != null) {
                 Rect screen = new Rect();
                 root.getBoundsInScreen(screen);
@@ -980,6 +1039,14 @@ public class LimitService extends AccessibilityService {
                 if (selectedIndex(tabs) > 0) { setForYou(false); swipeAttempt = 0; }
                 return;
             }
+            AccessibilityNodeInfo pager = findPager(root, screen);
+            if (pager != null && pagerDirections(pager)[0]) {
+                // Ya se puede deslizar a la izquierda: no estás más en la primera página.
+                setForYou(false);
+                swipeAttempt = 0;
+                note("X: confirmado (por las páginas), pasó a Siguiendo");
+                return;
+            }
             AccessibilityNodeInfo after = findVerticalList(root, screen);
             if (before != null && after != null && !after.equals(before)) {
                 // El timeline que se ve es otro: ya estás en Siguiendo.
@@ -1002,6 +1069,46 @@ public class LimitService extends AccessibilityService {
         if (list != null && list.performAction(AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD)) {
             handler.postDelayed(this::clickXFollowing, 350);
         }
+    }
+
+    /** El contenedor grande de las páginas de X (se desliza hacia los costados). */
+    private static AccessibilityNodeInfo findPager(AccessibilityNodeInfo root, Rect screen) {
+        ArrayDeque<AccessibilityNodeInfo> queue = new ArrayDeque<>();
+        queue.add(root);
+        int seen = 0;
+        while (!queue.isEmpty() && seen < 300) {
+            AccessibilityNodeInfo n = queue.poll();
+            seen++;
+            if (n == null || !n.isVisibleToUser()) continue;
+            if (n.isScrollable()) {
+                Rect r = new Rect();
+                n.getBoundsInScreen(r);
+                boolean[] lr = pagerDirections(n);
+                if ((lr[0] || lr[1]) && r.width() >= screen.width() * 0.9f && r.height() >= screen.height() * 0.5f) {
+                    return n;
+                }
+            }
+            for (int i = 0; i < n.getChildCount(); i++) {
+                AccessibilityNodeInfo c = n.getChild(i);
+                if (c != null) queue.add(c);
+            }
+        }
+        return null;
+    }
+
+    /** {¿se puede deslizar a la izquierda?, ¿a la derecha?} */
+    private static boolean[] pagerDirections(AccessibilityNodeInfo n) {
+        boolean left = false, right = false;
+        for (AccessibilityNodeInfo.AccessibilityAction a : n.getActionList()) {
+            int id = a.getId();
+            if (id == android.R.id.accessibilityActionScrollLeft) left = true;
+            if (id == android.R.id.accessibilityActionScrollRight) right = true;
+            if (android.os.Build.VERSION.SDK_INT >= 29) {
+                if (id == android.R.id.accessibilityActionPageLeft) left = true;
+                if (id == android.R.id.accessibilityActionPageRight) right = true;
+            }
+        }
+        return new boolean[]{left, right};
     }
 
     /** La lista del timeline (se desplaza hacia arriba/abajo, no hacia los costados). */

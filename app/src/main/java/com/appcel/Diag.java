@@ -163,7 +163,21 @@ final class Diag {
         if (n.isSelected()) sb.append(" [SELECCIONADO]");
         if (n.isChecked()) sb.append(" [CHK]");
         if (n.isClickable()) sb.append(" [clic]");
-        if (n.isScrollable()) sb.append(" [scroll]");
+        if (n.isScrollable()) {
+            StringBuilder dirs = new StringBuilder();
+            for (AccessibilityNodeInfo.AccessibilityAction a : n.getActionList()) {
+                int id = a.getId();
+                if (id == android.R.id.accessibilityActionScrollLeft) dirs.append('←');
+                if (id == android.R.id.accessibilityActionScrollRight) dirs.append('→');
+                if (id == android.R.id.accessibilityActionScrollUp) dirs.append('↑');
+                if (id == android.R.id.accessibilityActionScrollDown) dirs.append('↓');
+                if (android.os.Build.VERSION.SDK_INT >= 29) {
+                    if (id == android.R.id.accessibilityActionPageLeft) dirs.append("p←");
+                    if (id == android.R.id.accessibilityActionPageRight) dirs.append("p→");
+                }
+            }
+            sb.append(" [scroll ").append(dirs).append(']');
+        }
         if (!n.isVisibleToUser()) sb.append(" [oculto]");
         Rect r = new Rect();
         n.getBoundsInScreen(r);

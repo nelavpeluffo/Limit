@@ -32,6 +32,7 @@ final class Overlay {
     private TextView pill;
     private boolean shown;
     private ValueAnimator glowAnim;
+    private WindowManager.LayoutParams lastLp;
 
     Overlay(AccessibilityService service) {
         this.service = service;
@@ -76,6 +77,16 @@ final class Overlay {
         });
         glowAnim = in;
         in.start();
+    }
+
+    /** Vuelve a poner la pastillita por encima de otras ventanas de Limit (la del reloj). */
+    void raise() {
+        if (!shown || lastLp == null) return;
+        try {
+            wm.removeView(frame);
+            wm.addView(frame, lastLp);
+        } catch (Exception ignored) {
+        }
     }
 
     void hide() {
@@ -143,6 +154,7 @@ final class Overlay {
             lp.y = statusBarHeight() + (int) (6 * d) - (int) (GLOW_PAD_DP * d);
             try {
                 wm.addView(frame, lp);
+                lastLp = lp;
                 shown = true;
             } catch (Exception ignored) {
                 // Si el sistema no deja mostrarla, el límite sigue funcionando igual.
