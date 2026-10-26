@@ -57,6 +57,8 @@ public class LimitService extends AccessibilityService {
     private boolean exploreCheckQueued;
     private long lastBlockerUpdate;
     private boolean blockerUpdateQueued;
+    private LockNotice lockNotice;
+    private boolean profileReelsNoticed;
     private boolean keyboardSeenInSearch;   // en este buscador ya estuvo el teclado abierto
     private boolean leaving;   // saliendo del buscador hacia el Inicio, con el reloj puesto
     private int homeStable;   // revisiones seguidas con el Inicio ya puesto
@@ -118,6 +120,7 @@ public class LimitService extends AccessibilityService {
         blocker = new Blocker(this);
         searchBlocker = new Blocker(this, R.drawable.ic_search, this::openInstagramSearch);
         cover = new Cover(this);
+        lockNotice = new LockNotice(this);
         backCatcher = new Blocker(this, 0, this::onBackArrowTapped);
         setKeyboardHidden(false);
     }
@@ -201,6 +204,8 @@ public class LimitService extends AccessibilityService {
         backCatcher.hide();
         cover.hide();
         cover.disarm();
+        lockNotice.hide();
+        profileReelsNoticed = false;
         if (leaving) { leaving = false; setKeyboardHidden(false); }
         xCovered = false;
         cancelNotice();
@@ -390,7 +395,10 @@ public class LimitService extends AccessibilityService {
             long remaining = usage.remaining(k);
             if (remaining <= 0) {
                 // En X la pastillita roja (y después la violeta) la maneja el aviso de cambio.
-                if (k == Kind.REELS) overlay.show(k.label + ": límite de hoy alcanzado", true);
+                // En la lupa no: ahí ya no se llega a ver nada (el reloj te lleva al Inicio).
+                if (k == Kind.REELS && !"lupa".equals(igSection) && !"busqueda".equals(igSection)) {
+                    overlay.show(k.label + ": límite de hoy alcanzado", true);
+                }
                 enforce(k);
             } else {
                 enforceStreak = 0;
@@ -458,6 +466,15 @@ public class LimitService extends AccessibilityService {
                 searchBlocker.hide();
                 backCatcher.hide();
                 return;
+            }
+            // Perfil con pestaña Reels: en vez de un candado encima, un aviso que se va solo.
+            if (profileReelsTab(root) != null) {
+                if (!profileReelsNoticed) {
+                    profileReelsNoticed = true;
+                    lockNotice.show();
+                }
+            } else {
+                profileReelsNoticed = false;
             }
             String msg = "Reels está bloqueado hasta mañana";
             place(blocker, reelsTabButton(root), root, true, msg);
@@ -918,7 +935,34 @@ public class LimitService extends AccessibilityService {
                 if (n != null && n.isVisibleToUser()) return n;
             }
         }
-        return clickableUp(findExact(root, IG_REELS_LABEL));
+        return null;   // solo el botón de la barra de abajo (no la pestaña Reels de un perfil)
+    }
+
+    /**
+     * La pestaña "Reels" de un perfil (no el botón de la barra de abajo). Se busca por
+     * su nombre de pestaña, como el resto; no se mira nada del perfil.
+     */
+    private static AccessibilityNodeInfo profileReelsTab(AccessibilityNodeInfo root) {
+        Rect bar = new Rect();
+        List<AccessibilityNodeInfo> tabBar = root.findAccessibilityNodeInfosByViewId(IG + ":id/tab_bar");
+        if (tabBar != null) for (AccessibilityNodeInfo t : tabBar) {
+            if (t != null && t.isVisibleToUser()) { t.getBoundsInScreen(bar); break; }
+        }
+        for (String label : IG_REELS_LABEL) {
+            List<AccessibilityNodeInfo> found = root.findAccessibilityNodeInfosByText(label);
+            if (found == null) continue;
+            for (AccessibilityNodeInfo n : found) {
+                if (n == null || !n.isVisibleToUser()) continue;
+                if (!startsWithLabel(n.getContentDescription(), label) && !startsWithLabel(n.getText(), label)) continue;
+                String id = n.getViewIdResourceName();
+                if (id != null && id.endsWith(":id/clips_tab")) continue;
+                Rect r = new Rect();
+                n.getBoundsInScreen(r);
+                if (!bar.isEmpty() && Rect.intersects(r, bar)) continue;
+                return n;
+            }
+        }
+        return null;
     }
 
     /**
@@ -994,8 +1038,7 @@ public class LimitService extends AccessibilityService {
             }
             return false;
         }
-        AccessibilityNodeInfo byName = findExact(root, IG_REELS_LABEL);
-        return byName != null && tabSelected(byName);
+        return false;   // sin la barra de abajo no hay botón de Reels (la pestaña de un perfil no cuenta)
     }
 
     /**
