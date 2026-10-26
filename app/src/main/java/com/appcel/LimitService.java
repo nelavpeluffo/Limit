@@ -132,7 +132,10 @@ public class LimitService extends AccessibilityService {
             trackXEvent(e);
             quickCheckX();
         }
-        if (IG.contentEquals(pkg)) quickCheckExplore();
+        if (IG.contentEquals(pkg)) {
+            if (e.getEventType() == AccessibilityEvent.TYPE_VIEW_CLICKED) onInstagramClick(e);
+            quickCheckExplore();
+        }
         if (IG.contentEquals(pkg) && e.getEventType() == AccessibilityEvent.TYPE_VIEW_LONG_CLICKED) {
             onInstagramLongPress(e);
         }
@@ -498,6 +501,77 @@ public class LimitService extends AccessibilityService {
         else cover.hide();   // nunca queda tapado más de ~5 s
     }
 
+    /** ¿Estás en el buscador de Instagram (no en la grilla de la lupa)? */
+    private static boolean inSearchScreen(AccessibilityNodeInfo root) {
+        if (exploreGridVisible(root)) return false;
+        List<AccessibilityNodeInfo> found = root.findAccessibilityNodeInfosByViewId(IG + ":id/action_bar_search_edit_text");
+        if (found == null) return false;
+        for (AccessibilityNodeInfo n : found) if (n != null && n.isVisibleToUser()) return true;
+        return false;
+    }
+
+    /** Flecha de atrás (arriba a la izquierda) tocada en el buscador, con el límite cumplido. */
+    private void onInstagramClick(AccessibilityEvent e) {
+        if (usage.remaining(Kind.REELS) > 0) return;
+        try {
+            AccessibilityNodeInfo src = e.getSource();
+            if (src == null) return;
+            Rect r = new Rect();
+            src.getBoundsInScreen(r);
+            AccessibilityNodeInfo root = getRootInActiveWindow();
+            if (root == null) return;
+            Rect screen = new Rect();
+            root.getBoundsInScreen(screen);
+            boolean topLeft = r.right < screen.width() * 0.25f && r.bottom < screen.height() * 0.15f;
+            if (topLeft && inSearchScreen(root)) coverBackFromSearch();
+        } catch (Exception ignored) {
+        }
+    }
+
+    /**
+     * Volviendo atrás desde el buscador con el límite cumplido: el reloj tapa la
+     * pantalla antes de que aparezca la grilla, y después te lleva al Inicio.
+     */
+    private void coverBackFromSearch() {
+        searchFlowUntil = 0;
+        cover.show();
+        handler.postDelayed(() -> afterBackFromSearch(0), 120);
+    }
+
+    private void afterBackFromSearch(int attempt) {
+        try {
+            AccessibilityNodeInfo root = getRootInActiveWindow();
+            CharSequence pkg = root == null ? null : root.getPackageName();
+            if (pkg == null || !IG.contentEquals(pkg)) { cover.hide(); return; }
+            if (exploreGridVisible(root)) {
+                exploreRedirectUntil = 0;
+                redirectExploreToHome(root);   // el reloj ya está puesto; queda hasta el Inicio
+                return;
+            }
+            // Atrás solo cerró el teclado y seguís en el buscador: sacar el reloj.
+            if (attempt >= 3 && inSearchScreen(root)) { cover.hide(); return; }
+        } catch (Exception ignored) {
+        }
+        if (attempt < 12) handler.postDelayed(() -> afterBackFromSearch(attempt + 1), 100);
+        else cover.hide();
+    }
+
+    /** Botón "atrás" del teléfono (o el gesto de atrás). */
+    @Override
+    protected boolean onKeyEvent(android.view.KeyEvent event) {
+        if (event.getKeyCode() == android.view.KeyEvent.KEYCODE_BACK
+                && event.getAction() == android.view.KeyEvent.ACTION_DOWN
+                && usage != null && usage.remaining(Kind.REELS) <= 0) {
+            try {
+                AccessibilityNodeInfo root = getRootInActiveWindow();
+                CharSequence pkg = root == null ? null : root.getPackageName();
+                if (pkg != null && IG.contentEquals(pkg) && inSearchScreen(root)) coverBackFromSearch();
+            } catch (Exception ignored) {
+            }
+        }
+        return false;   // la tecla sigue su camino normal
+    }
+
     /**
      * Botón violeta con lupa (límite cumplido): abre el buscador de Instagram directo,
      * con una cortina oscura un instante para que no se vea la grilla de publicaciones.
@@ -508,7 +582,10 @@ public class LimitService extends AccessibilityService {
             AccessibilityNodeInfo root = getRootInActiveWindow();
             if (root == null) return;
             // Si ya está el campo de búsqueda a la vista, solo tocarlo.
-            if (clickSearchField(root)) return;
+            if (clickSearchField(root)) {
+                searchFlowUntil = SystemClock.elapsedRealtime() + 400;
+                return;
+            }
             cover.show();
             AccessibilityNodeInfo tab = searchTabButton(root);
             if (tab == null || !clickUp(tab)) {
@@ -527,6 +604,8 @@ public class LimitService extends AccessibilityService {
             AccessibilityNodeInfo root = getRootInActiveWindow();
             if (root != null && clickSearchField(root)) {
                 handler.postDelayed(cover::hide, 350);
+                // Listo el buscador: desde ya, volver a la grilla se vigila otra vez.
+                searchFlowUntil = SystemClock.elapsedRealtime() + 400;
                 return;
             }
         } catch (Exception ignored) {
