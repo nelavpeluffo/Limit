@@ -187,6 +187,10 @@ public class LimitService extends AccessibilityService {
         return false;
     }
 
+    private void note(String text) {
+        if (Diag.recording()) Diag.note(this, text);
+    }
+
     @Override
     public void onInterrupt() {
     }
@@ -536,8 +540,13 @@ public class LimitService extends AccessibilityService {
         } else if (type == AccessibilityEvent.TYPE_VIEW_CLICKED
                 || type == AccessibilityEvent.TYPE_VIEW_SELECTED) {
             String text = eventText(e);
-            if (matchesAny(text, X_FOR_YOU)) setForYou(true);
-            else if (matchesAny(text, X_FOLLOWING)) setForYou(false);
+            if (matchesAny(text, X_FOR_YOU)) {
+                setForYou(true);
+                note("X: tocaste o se seleccionó Para ti");
+            } else if (matchesAny(text, X_FOLLOWING)) {
+                setForYou(false);
+                note("X: tocaste o se seleccionó Siguiendo");
+            }
         }
     }
 

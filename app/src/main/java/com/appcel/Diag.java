@@ -101,6 +101,9 @@ final class Diag {
             label(sb, root, LimitService.X_FOR_YOU);
             label(sb, root, LimitService.X_FOLLOWING);
             label(sb, root, LimitService.X_HOME_TAB);
+            sb.append("forma de la pantalla (sin textos ni contenido):\n");
+            int[] count = {0};
+            shape(root, 0, sb, count);
         }
 
         try (FileWriter w = new FileWriter(f, true)) {

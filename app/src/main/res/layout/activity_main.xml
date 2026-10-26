@@ -173,7 +173,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
             android:lineSpacingExtra="3dp"
-            android:text="Si la app detecta mal, tocá «Empezar diagnóstico» y durante 3 minutos andá por Instagram (Inicio, Reels, Buscar) y por X (Para ti, Siguiendo, Buscar). Mientras tanto no cuenta tiempo. Después tocá «Enviar diagnóstico». El archivo guarda si los botones de las pestañas están seleccionados y, en Instagram, la forma de la pantalla (tipo y tamaño de cada elemento): ningún texto, foto, video ni mensaje."
+            android:text="Si la app detecta mal, tocá «Empezar diagnóstico» y durante 3 minutos andá por Instagram (Inicio, Reels, Buscar) y por X (Para ti, Siguiendo, Buscar). Mientras tanto no cuenta tiempo. Después tocá «Enviar diagnóstico». El archivo guarda si los botones de las pestañas están seleccionados y la forma de la pantalla de Instagram y X (tipo y tamaño de cada elemento): ningún texto, foto, video ni mensaje."
             android:textColor="@android:color/black"
             android:textSize="14sp" />
 
