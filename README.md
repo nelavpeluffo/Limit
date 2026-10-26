@@ -24,7 +24,7 @@ El resto de Instagram y X (feed, historias, mensajes, la pestaña *Siguiendo*) s
 
 ## Actualizar
 
-En Limit, tocá **Descargar la última versión**, abrí el archivo y tocá **Actualizar**. No hace falta volver a activarla.
+Con [Obtainium](https://github.com/ImranR98/Obtainium) (agregando `https://github.com/nelavpeluffo/Limit`) avisa y actualiza con un toque. También se puede desde Limit: **Descargar la última versión**, abrir el archivo y tocar **Actualizar**. No hace falta volver a activarla.
 
 ## Privacidad
 

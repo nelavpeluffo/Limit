@@ -220,17 +220,39 @@ public class LimitService extends AccessibilityService {
     private void updateBlocker(AccessibilityNodeInfo root, String pkg) {
         AccessibilityNodeInfo tab = null;
         String msg = null;
+        boolean bottomBar = false;
         if (root != null && IG.equals(pkg) && usage.remaining(Kind.REELS) <= 0) {
+            // Con un Reel o la sección Reels abierta, la barra de abajo no está: sin candado.
+            if (reelsTabSelected(root) || reelsPlayerFullScreen(root)) {
+                blocker.hide();
+                return;
+            }
             tab = reelsTabButton(root);
             msg = "Reels está bloqueado hasta mañana";
+            bottomBar = true;
         } else if (root != null && X.equals(pkg) && usage.remaining(Kind.FOR_YOU) <= 0) {
             tab = clickableUp(findExact(root, X_FOR_YOU));
             msg = "Para ti está bloqueado hasta mañana";
         }
         Rect r = new Rect();
         if (tab != null && tab.isVisibleToUser()) tab.getBoundsInScreen(r);
-        if (r.width() < 10 || r.height() < 10) blocker.hide();
-        else blocker.show(r, msg);
+        if (looksLikeTabButton(r, root, bottomBar)) blocker.show(r, msg);
+        else blocker.hide();
+    }
+
+    /**
+     * Mientras la app anima la barra (al abrir un Reel, por ejemplo), el botón puede
+     * informar posiciones o tamaños raros. Solo se tapa si tiene forma de botón y,
+     * en Instagram, si está en la parte de abajo de la pantalla.
+     */
+    private static boolean looksLikeTabButton(Rect r, AccessibilityNodeInfo root, boolean bottomBar) {
+        if (r.width() < 10 || r.height() < 10) return false;
+        Rect screen = new Rect();
+        root.getBoundsInScreen(screen);
+        if (screen.isEmpty()) return false;
+        if (r.height() > screen.height() * 0.12f || r.width() > screen.width() * 0.6f) return false;
+        if (bottomBar && r.top < screen.height() * 0.8f) return false;
+        return true;
     }
 
     private static AccessibilityNodeInfo clickableUp(AccessibilityNodeInfo n) {
