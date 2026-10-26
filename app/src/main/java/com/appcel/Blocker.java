@@ -149,6 +149,8 @@ final class Blocker {
         private final float d;
         private android.animation.ValueAnimator anim;
         private float cx, cy, progress = -1f;
+        // Máscara que difumina la onda al acercarse a los bordes del área (sin caja visible).
+        private final android.graphics.Paint[] edgeMask = new android.graphics.Paint[4];
 
         RippleView(Context c, float d) {
             super(c);
@@ -186,9 +188,30 @@ final class Blocker {
         }
 
         @Override
+        protected void onSizeChanged(int w, int h, int oldw, int oldh) {
+            super.onSizeChanged(w, h, oldw, oldh);
+            float fx = w * 0.30f, fy = h * 0.42f;   // ancho del difuminado en cada borde
+            int clear = 0x00000000, solid = 0xFF000000;
+            android.graphics.Shader.TileMode clamp = android.graphics.Shader.TileMode.CLAMP;
+            android.graphics.Shader[] shaders = {
+                    new android.graphics.LinearGradient(0, 0, fx, 0, clear, solid, clamp),
+                    new android.graphics.LinearGradient(w, 0, w - fx, 0, clear, solid, clamp),
+                    new android.graphics.LinearGradient(0, 0, 0, fy, clear, solid, clamp),
+                    new android.graphics.LinearGradient(0, h, 0, h - fy, clear, solid, clamp),
+            };
+            for (int i = 0; i < 4; i++) {
+                android.graphics.Paint m = new android.graphics.Paint(android.graphics.Paint.ANTI_ALIAS_FLAG);
+                m.setShader(shaders[i]);
+                m.setXfermode(new android.graphics.PorterDuffXfermode(android.graphics.PorterDuff.Mode.DST_IN));
+                edgeMask[i] = m;
+            }
+        }
+
+        @Override
         protected void onDraw(android.graphics.Canvas canvas) {
             if (progress < 0f) return;
             float w = getWidth(), h = getHeight();
+            int layer = canvas.saveLayer(0, 0, w, h, null);
             // Hasta la esquina más lejana del área, para que la onda la cubra entera.
             float maxR = (float) Math.max(Math.max(Math.hypot(cx, cy), Math.hypot(w - cx, cy)),
                     Math.max(Math.hypot(cx, h - cy), Math.hypot(w - cx, h - cy)));
@@ -206,6 +229,9 @@ final class Blocker {
             canvas.drawCircle(cx, cy, r, glow);
             ring.setAlpha(a);
             canvas.drawCircle(cx, cy, r, ring);
+            // Difuminar hacia los cuatro bordes: la onda se desvanece antes de tocarlos.
+            for (android.graphics.Paint m : edgeMask) if (m != null) canvas.drawRect(0, 0, w, h, m);
+            canvas.restoreToCount(layer);
         }
     }
 }
