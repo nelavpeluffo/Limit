@@ -11,6 +11,8 @@ import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
 import android.widget.Toast;
 
+import java.util.ArrayDeque;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 
@@ -332,8 +334,11 @@ public class LimitService extends AccessibilityService {
         }
         searchBlocker.hide();
         if (root != null && X.equals(pkg) && usage.remaining(Kind.FOR_YOU) <= 0) {
-            place(blocker, clickableUp(findExact(root, X_FOR_YOU)), root, false,
-                    "Para ti está bloqueado hasta mañana");
+            Rect screen = new Rect();
+            root.getBoundsInScreen(screen);
+            List<AccessibilityNodeInfo> tabs = findTabRow(root, screen, true);
+            AccessibilityNodeInfo forYouTab = tabs != null ? tabs.get(0) : clickableUp(findExact(root, X_FOR_YOU));
+            place(blocker, forYouTab, root, false, "Para ti está bloqueado hasta mañana");
         } else {
             blocker.hide();
         }
@@ -490,29 +495,109 @@ public class LimitService extends AccessibilityService {
 
     /** X: pestaña "Para ti" seleccionada en el Inicio. */
     private boolean forYouVisible(AccessibilityNodeInfo root) {
-        AccessibilityNodeInfo home = findExact(root, X_HOME_TAB);
-        if (home != null && !isSelectedUp(home) && !isSelectedDown(home, 2) && hasSelectedSibling(home)) {
-            // Estás en otra pestaña de abajo (Buscar, Notificaciones, etc.)
-            xForYou = false;
-            xForYouKnown = true;
-            return false;
+        Rect screen = new Rect();
+        root.getBoundsInScreen(screen);
+
+        // Barra de abajo: si está seleccionado otro botón que no sea Inicio (el primero),
+        // estás en Buscar, Notificaciones, etc.: no cuenta.
+        List<AccessibilityNodeInfo> bottom = findTabRow(root, screen, false);
+        if (bottom != null) {
+            int sel = selectedIndex(bottom);
+            if (sel > 0) return false;
         }
 
+        // Fila de pestañas de arriba del Inicio: la primera (izquierda) es "Para ti".
+        // Se reconoce por su forma y por cuál está seleccionada, sin leer textos.
+        List<AccessibilityNodeInfo> tabs = findTabRow(root, screen, true);
+        if (tabs != null) {
+            int sel = selectedIndex(tabs);
+            if (sel == 0) setForYou(true);
+            else if (sel > 0) setForYou(false);
+            return xForYou;
+        }
+
+        // Versiones anteriores de X: por el nombre de las pestañas.
+        AccessibilityNodeInfo home = findExact(root, X_HOME_TAB);
+        if (home != null && !isSelectedUp(home) && !isSelectedDown(home, 2) && hasSelectedSibling(home)) {
+            return false;
+        }
         AccessibilityNodeInfo forYou = findExact(root, X_FOR_YOU);
         AccessibilityNodeInfo following = findExact(root, X_FOLLOWING);
         boolean forYouSel = forYou != null && tabSelected(forYou);
         boolean followingSel = following != null && tabSelected(following);
-
-        // Solo cuenta si "Para ti" figura seleccionada y "Siguiendo" no
-        // (o si tocaste "Para ti" y todavía no cambiaste).
         if (forYouSel && !followingSel) setForYou(true);
         else if (followingSel && !forYouSel) setForYou(false);
-
         if (forYou != null && following != null) return xForYou;
 
         // Las pestañas se ocultaron al scrollear: seguimos en lo último que vimos,
         // mientras no hayas abierto otra pantalla de X.
-        return xForYou && xActivity != null && xActivity.equals(xForYouActivity);
+        return xForYou && (xActivity == null || xActivity.equals(xForYouActivity));
+    }
+
+    /**
+     * Busca una fila de pestañas por su forma: varios botones uno al lado del otro,
+     * a la misma altura, con uno solo seleccionado. Arriba (top=true): las pestañas
+     * del Inicio de X, anchas. Abajo (top=false): la barra de navegación.
+     * Devuelve las pestañas ordenadas de izquierda a derecha, o null.
+     */
+    private static List<AccessibilityNodeInfo> findTabRow(AccessibilityNodeInfo root, Rect screen, boolean top) {
+        if (screen.isEmpty()) return null;
+        ArrayDeque<AccessibilityNodeInfo> queue = new ArrayDeque<>();
+        queue.add(root);
+        int seen = 0;
+        while (!queue.isEmpty() && seen < 500) {
+            AccessibilityNodeInfo n = queue.poll();
+            seen++;
+            if (n == null || !n.isVisibleToUser()) continue;
+            int count = n.getChildCount();
+            if (count >= 2) {
+                List<AccessibilityNodeInfo> row = new ArrayList<>();
+                int rowTop = Integer.MIN_VALUE;
+                boolean ok = true;
+                for (int i = 0; i < count; i++) {
+                    AccessibilityNodeInfo c = n.getChild(i);
+                    if (c == null || !c.isVisibleToUser()) continue;
+                    Rect r = new Rect();
+                    c.getBoundsInScreen(r);
+                    boolean wide = top ? r.width() >= screen.width() * 0.25f : r.width() >= screen.width() * 0.12f;
+                    boolean tall = r.height() >= 60 && r.height() <= screen.height() * 0.1f;
+                    if (!wide || !tall) continue;  // p. ej. el botón de configuración al costado
+                    if (rowTop == Integer.MIN_VALUE) rowTop = r.top;
+                    else if (Math.abs(r.top - rowTop) > 12) continue;  // otra fila (p. ej. el subrayado)
+                    row.add(c);
+                }
+                boolean inRegion = rowTop != Integer.MIN_VALUE && (top
+                        ? rowTop < screen.height() * 0.25f
+                        : rowTop > screen.height() * 0.82f);
+                int needed = top ? 2 : 4;
+                if (ok && inRegion && row.size() >= needed) {
+                    int selected = 0;
+                    for (AccessibilityNodeInfo c : row) if (c.isSelected() || isSelectedDown(c, 2)) selected++;
+                    if (selected == 1) {
+                        row.sort((a, b) -> {
+                            Rect ra = new Rect(), rb = new Rect();
+                            a.getBoundsInScreen(ra);
+                            b.getBoundsInScreen(rb);
+                            return Integer.compare(ra.left, rb.left);
+                        });
+                        return row;
+                    }
+                }
+            }
+            for (int i = 0; i < count; i++) {
+                AccessibilityNodeInfo c = n.getChild(i);
+                if (c != null) queue.add(c);
+            }
+        }
+        return null;
+    }
+
+    private static int selectedIndex(List<AccessibilityNodeInfo> row) {
+        for (int i = 0; i < row.size(); i++) {
+            AccessibilityNodeInfo c = row.get(i);
+            if (c.isSelected() || isSelectedDown(c, 2)) return i;
+        }
+        return -1;
     }
 
     /** ¿La pestaña (el botón tocable que contiene este texto) está seleccionada? */
@@ -571,11 +656,21 @@ public class LimitService extends AccessibilityService {
         AccessibilityNodeInfo root = getRootInActiveWindow();
         if (k == Kind.FOR_YOU) {
             if (root != null) {
+                Rect screen = new Rect();
+                root.getBoundsInScreen(screen);
+                List<AccessibilityNodeInfo> tabs = findTabRow(root, screen, true);
+                if (tabs != null && tabs.size() >= 2 && clickUp(tabs.get(1))) {
+                    setForYou(false);
+                    return;
+                }
                 AccessibilityNodeInfo following = findExact(root, X_FOLLOWING);
                 if (following != null && clickUp(following)) {
                     setForYou(false);
                     return;
                 }
+                // Tocar "Inicio" (primer botón de abajo) sube al principio y vuelve a mostrar las pestañas.
+                List<AccessibilityNodeInfo> bottom = findTabRow(root, screen, false);
+                if (bottom != null && clickUp(bottom.get(0))) return;
                 // Tocar "Inicio" sube al principio y vuelve a mostrar las pestañas.
                 AccessibilityNodeInfo home = findExact(root, X_HOME_TAB);
                 if (home != null && clickUp(home)) return;
