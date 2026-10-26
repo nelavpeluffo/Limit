@@ -63,6 +63,7 @@ public class LimitService extends AccessibilityService {
     private long lastProfileNotice;
     private long profileGoneSince;
     private long lastProfileSwitch;
+    private long lastReelsTabAction;   // última vez que se tocó/eligió la pestaña Reels de un perfil
     private boolean keyboardSeenInSearch;   // en este buscador ya estuvo el teclado abierto
     private boolean leaving;   // saliendo del buscador hacia el Inicio, con el reloj puesto
     private int homeStable;   // revisiones seguidas con el Inicio ya puesto
@@ -135,8 +136,9 @@ public class LimitService extends AccessibilityService {
         if (usage == null || e == null) return;
         CharSequence pkg = e.getPackageName();
         if (e.getEventType() == AccessibilityEvent.TYPE_WINDOWS_CHANGED) {
-            // Se abrió o se cerró una ventana (por ejemplo, el teclado).
+            // Se abrió o se cerró una ventana (por ejemplo, el teclado o un menú).
             checkKeyboardClosed();
+            checkProfileReels();
             return;
         }
         boolean target = pkg != null && (IG.contentEquals(pkg) || X.contentEquals(pkg));
@@ -486,27 +488,11 @@ public class LimitService extends AccessibilityService {
                 backCatcher.hide();
                 return;
             }
-            // Perfil con pestaña Reels: en vez de un candado encima, un aviso que se va solo.
-            AccessibilityNodeInfo profileReels = profileReelsTab(root);
-            long nowP = SystemClock.elapsedRealtime();
-            if (profileReels != null) {
-                // Si entrás a la pestaña Reels (de un perfil o de los resultados de búsqueda),
-                // volvés a la primera pestaña de esa fila.
-                if (tabSelected(profileReels)) switchProfileToGrid(profileReels);
-            }
-            if (profileReels != null && !searchFieldVisible(root)) {
-                lastProfileSeen = nowP;
-                profileGoneSince = 0;
-                // Una vez por perfil, y nunca más seguido que cada 20 s.
-                if (!profileReelsNoticed && nowP - lastProfileNotice > 20_000) {
-                    profileReelsNoticed = true;
-                    lastProfileNotice = nowP;
-                    lockNotice.show();
-                }
-            } else if (profileReelsNoticed) {
-                // Recién cuando saliste del perfil (unos segundos sin verlo) puede volver a avisar.
-                if (profileGoneSince == 0) profileGoneSince = nowP;
-                else if (nowP - profileGoneSince > 3000) profileReelsNoticed = false;
+            // Perfiles: la pestaña Reels te devuelve a la grilla del perfil (con aviso).
+            if (!checkProfileReels()) {
+                // Resultados de búsqueda: la pestaña "Reels" te pasa a la primera pestaña.
+                AccessibilityNodeInfo searchReels = profileReelsTab(root);
+                if (searchReels != null && tabSelected(searchReels)) switchProfileToGrid(searchReels);
             }
             String msg = "Reels está bloqueado hasta mañana";
             place(blocker, reelsTabButton(root), root, true, msg);
@@ -764,6 +750,9 @@ public class LimitService extends AccessibilityService {
     /** ¿Estás en el buscador de Instagram (no en la grilla de la lupa)? */
     private static boolean inSearchScreen(AccessibilityNodeInfo root) {
         if (exploreGridVisible(root)) return false;
+        // Un perfil abierto desde el buscador: el buscador sigue debajo, pero estás en el perfil
+        // (su flecha de atrás tiene que volver a los resultados, no al Inicio).
+        if (hasId(root, "profile_tab_layout") || hasId(root, "profile_tabs_container")) return false;
         List<AccessibilityNodeInfo> found = root.findAccessibilityNodeInfosByViewId(IG + ":id/action_bar_search_edit_text");
         if (found == null) return false;
         for (AccessibilityNodeInfo n : found) if (n != null && n.isVisibleToUser()) return true;
@@ -1010,9 +999,9 @@ public class LimitService extends AccessibilityService {
     }
 
     /**
-     * Tocaste la pestaña Reels de un perfil (Instagram abre además un menú "Más
-     * recientes / Más vistos"): se cierra ese menú, se vuelve a la grilla del perfil
-     * y aparece el aviso violeta abajo.
+     * Tocaste una pestaña de un perfil (la de Reels o la flechita de al lado, que abre
+     * el menú "Más recientes / Más vistos"): se revisa enseguida, varias veces, para
+     * cerrar ese menú y volver a la grilla.
      */
     private boolean onProfileReelsClick(AccessibilityEvent e) {
         AccessibilityNodeInfo src;
@@ -1021,22 +1010,122 @@ public class LimitService extends AccessibilityService {
         } catch (Exception ex) {
             return false;
         }
-        if (src == null) return false;
-        String id = src.getViewIdResourceName();
-        if (id != null && id.endsWith(":id/clips_tab")) return false;   // botón de la barra de abajo
-        boolean reels = hasReelsLabel(src, 0)
-                || startsWithLabel(e.getContentDescription(), IG_REELS_LABEL[0]);
-        if (!reels && e.getText() != null) {
-            for (CharSequence t : e.getText()) if (startsWithLabel(t, IG_REELS_LABEL[0])) reels = true;
+        String id = src == null ? null : src.getViewIdResourceName();
+        if (id == null || !id.contains(":id/profile_tab")) return false;
+        lastReelsTabAction = SystemClock.elapsedRealtime();
+        for (long delay : new long[]{60, 200, 450, 800}) {
+            handler.postDelayed(this::checkProfileReels, delay);
         }
-        if (!reels || !inTabRow(src)) return false;
-        note("Instagram: tocaste la pestaña Reels de un perfil → grilla del perfil");
-        handler.postDelayed(() -> leaveProfileReels(src, 0), 120);
         return true;
     }
 
+    /**
+     * Con el límite cumplido, en un perfil: avisa una vez al entrar, y si quedó elegida
+     * la pestaña Reels (o se abrió su menú) cierra el menú y vuelve a la grilla.
+     * Se reconoce todo por los nombres internos de las pestañas, sin mirar el perfil.
+     * Devuelve true si hay un perfil a la vista.
+     */
+    private boolean checkProfileReels() {
+        if (usage == null || leaving || usage.remaining(Kind.REELS) > 0) return false;
+        long now = SystemClock.elapsedRealtime();
+        try {
+            AccessibilityNodeInfo main = instagramMainRoot();
+            List<AccessibilityNodeInfo> tabs = main == null ? null : profileTabs(main);
+            if (tabs == null) {
+                if (profileReelsNoticed) {
+                    // Recién cuando saliste del perfil (unos segundos sin verlo) puede volver a avisar.
+                    if (profileGoneSince == 0) profileGoneSince = now;
+                    else if (now - profileGoneSince > 3000) profileReelsNoticed = false;
+                }
+                return false;
+            }
+            lastProfileSeen = now;
+            profileGoneSince = 0;
+            int reels = reelsTabIndex(tabs);
+            if (reels <= 0) return true;   // perfil sin pestaña Reels
+
+            // Al entrar al perfil: una vez por perfil, y nunca más seguido que cada 20 s.
+            if (!profileReelsNoticed && now - lastProfileNotice > 20_000) {
+                profileReelsNoticed = true;
+                lastProfileNotice = now;
+                lockNotice.show();
+            }
+
+            boolean reelsSelected = selectedDeep(tabs.get(reels));
+            AccessibilityNodeInfo active = getRootInActiveWindow();
+            boolean menuOpen = active != null && !active.equals(main) && hasId(active, "context_menu_options_list");
+            if (menuOpen && (reelsSelected || now - lastReelsTabAction < 3000)) {
+                // Se abrió el menú de la pestaña Reels: cerrarlo y seguir.
+                performGlobalAction(GLOBAL_ACTION_BACK);
+                lastReelsTabAction = now;
+                handler.postDelayed(this::checkProfileReels, 220);
+                return true;
+            }
+            if (reelsSelected && now - lastProfileSwitch > 450) {
+                lastProfileSwitch = now;
+                lastReelsTabAction = now;
+                note("Instagram: pestaña Reels de un perfil → grilla del perfil");
+                if (!clickDown(tabs.get(0))) clickUp(tabs.get(0));
+                if (now - lastProfileNotice > 4000) {
+                    lastProfileNotice = now;
+                    lockNotice.show();
+                }
+                handler.postDelayed(this::checkProfileReels, 350);
+            }
+            return true;
+        } catch (Exception ignored) {
+            return false;
+        }
+    }
+
+    /** La ventana principal de Instagram (no un menú encima). */
+    private AccessibilityNodeInfo instagramMainRoot() {
+        List<android.view.accessibility.AccessibilityWindowInfo> ws = getWindows();
+        AccessibilityNodeInfo best = null;
+        int bestArea = 0;
+        if (ws != null) for (android.view.accessibility.AccessibilityWindowInfo w : ws) {
+            if (w == null || w.getType() != android.view.accessibility.AccessibilityWindowInfo.TYPE_APPLICATION) continue;
+            AccessibilityNodeInfo r = w.getRoot();
+            CharSequence p = r == null ? null : r.getPackageName();
+            if (p == null || !IG.contentEquals(p)) continue;
+            Rect b = new Rect();
+            w.getBoundsInScreen(b);
+            int area = b.width() * b.height();
+            if (area > bestArea) {
+                bestArea = area;
+                best = r;
+            }
+        }
+        return best != null ? best : getRootInActiveWindow();
+    }
+
+    /** Las pestañas de un perfil (grilla, Reels, …), de izquierda a derecha. */
+    private static List<AccessibilityNodeInfo> profileTabs(AccessibilityNodeInfo root) {
+        List<AccessibilityNodeInfo> layouts = root.findAccessibilityNodeInfosByViewId(IG + ":id/profile_tab_layout");
+        if (layouts == null) return null;
+        for (AccessibilityNodeInfo layout : layouts) {
+            if (layout == null || !layout.isVisibleToUser() || layout.getChildCount() == 0) continue;
+            AccessibilityNodeInfo row = layout.getChild(0);
+            if (row == null) continue;
+            List<AccessibilityNodeInfo> tabs = new ArrayList<>();
+            for (int i = 0; i < row.getChildCount(); i++) {
+                AccessibilityNodeInfo t = row.getChild(i);
+                if (t != null) tabs.add(t);
+            }
+            if (tabs.size() >= 2) return tabs;
+        }
+        return null;
+    }
+
+    /** Cuál es la pestaña Reels: la que tiene la flechita del menú, o la que se llama "Reels". */
+    private static int reelsTabIndex(List<AccessibilityNodeInfo> tabs) {
+        for (int i = 0; i < tabs.size(); i++) if (hasIdDown(tabs.get(i), "profile_tab_icon_dropdown", 0)) return i;
+        for (int i = 0; i < tabs.size(); i++) if (hasReelsLabel(tabs.get(i), 0)) return i;
+        return -1;
+    }
+
     private static boolean hasReelsLabel(AccessibilityNodeInfo n, int depth) {
-        if (n == null || depth > 2) return false;
+        if (n == null || depth > 3) return false;
         if (startsWithLabel(n.getContentDescription(), IG_REELS_LABEL[0])
                 || startsWithLabel(n.getText(), IG_REELS_LABEL[0])) return true;
         for (int i = 0; i < n.getChildCount() && i < 6; i++) {
@@ -1045,58 +1134,23 @@ public class LimitService extends AccessibilityService {
         return false;
     }
 
-    private void leaveProfileReels(AccessibilityNodeInfo tab, int attempt) {
-        try {
-            // Primero cerrar el menú que abrió Instagram (una ventanita encima del perfil).
-            if (instagramPopupOnTop() && attempt < 3) {
-                performGlobalAction(GLOBAL_ACTION_BACK);
-                handler.postDelayed(() -> leaveProfileReels(tab, attempt + 1), 180);
-                return;
-            }
-            AccessibilityNodeInfo root = getRootInActiveWindow();
-            AccessibilityNodeInfo pr = root == null ? null : profileReelsTab(root);
-            AccessibilityNodeInfo target = pr != null ? pr : tab;
-            target.refresh();
-            lastProfileSwitch = 0;
-            switchProfileToGrid(target);
-            long now = SystemClock.elapsedRealtime();
-            lastProfileNotice = now;
-            profileReelsNoticed = true;
-            lockNotice.show();
-            // Por las dudas, revisar que haya quedado en la grilla.
-            if (attempt < 6) handler.postDelayed(() -> {
-                try {
-                    AccessibilityNodeInfo r = getRootInActiveWindow();
-                    AccessibilityNodeInfo p2 = r == null ? null : profileReelsTab(r);
-                    if (instagramPopupOnTop() || (p2 != null && tabSelected(p2))) leaveProfileReels(tab, attempt + 3);
-                } catch (Exception ignored) {
-                }
-            }, 400);
-        } catch (Exception ignored) {
-        }
-    }
-
-    /** ¿Hay una ventanita de Instagram (un menú) encima de la pantalla principal? */
-    private boolean instagramPopupOnTop() {
-        List<android.view.accessibility.AccessibilityWindowInfo> ws = getWindows();
-        if (ws == null) return false;
-        Rect screen = new Rect();
-        int maxArea = 0;
-        for (android.view.accessibility.AccessibilityWindowInfo w : ws) {
-            Rect r = new Rect();
-            w.getBoundsInScreen(r);
-            maxArea = Math.max(maxArea, r.width() * r.height());
-        }
-        for (android.view.accessibility.AccessibilityWindowInfo w : ws) {
-            if (w == null || !w.isActive() || w.getType() != android.view.accessibility.AccessibilityWindowInfo.TYPE_APPLICATION) continue;
-            AccessibilityNodeInfo r = w.getRoot();
-            CharSequence p = r == null ? null : r.getPackageName();
-            if (p == null || !IG.contentEquals(p)) return false;
-            Rect b = new Rect();
-            w.getBoundsInScreen(b);
-            return b.width() * b.height() < maxArea * 0.6f;   // más chica que la pantalla: es un menú
+    private static boolean hasIdDown(AccessibilityNodeInfo n, String name, int depth) {
+        if (n == null || depth > 3) return false;
+        String id = n.getViewIdResourceName();
+        if (id != null && id.endsWith(":id/" + name)) return true;
+        for (int i = 0; i < n.getChildCount() && i < 6; i++) {
+            if (hasIdDown(n.getChild(i), name, depth + 1)) return true;
         }
         return false;
+    }
+
+    private static boolean selectedDeep(AccessibilityNodeInfo n) {
+        return n.isSelected() || isSelectedDown(n, 3);
+    }
+
+    private static boolean hasId(AccessibilityNodeInfo root, String name) {
+        List<AccessibilityNodeInfo> found = root.findAccessibilityNodeInfosByViewId(IG + ":id/" + name);
+        return found != null && !found.isEmpty();
     }
 
     /** ¿Es una pestaña dentro de una fila de al menos 3 pestañas parecidas una al lado de la otra? */
@@ -1170,10 +1224,16 @@ public class LimitService extends AccessibilityService {
      */
     private boolean reelsVisible(AccessibilityNodeInfo root) {
         // En la pestaña Reels de un perfil no se te saca del perfil: se pasa a su grilla.
-        AccessibilityNodeInfo profileReels = profileReelsTab(root);
-        if (profileReels != null && tabSelected(profileReels)) {
-            igSection = "perfil";
-            return false;
+        List<AccessibilityNodeInfo> pTabs = profileTabs(root);
+        if (pTabs != null) {
+            int ri = reelsTabIndex(pTabs);
+            if (ri > 0 && selectedDeep(pTabs.get(ri))) {
+                igSection = "perfil";
+                return false;
+            }
+        } else {
+            AccessibilityNodeInfo searchReels = profileReelsTab(root);
+            if (searchReels != null && tabSelected(searchReels)) return false;
         }
         AccessibilityNodeInfo search = searchTabButton(root);
         if (search != null) {
