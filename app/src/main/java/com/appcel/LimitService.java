@@ -60,6 +60,8 @@ public class LimitService extends AccessibilityService {
     private LockNotice lockNotice;
     private boolean profileReelsNoticed;
     private long lastProfileSeen;
+    private long lastProfileNotice;
+    private long profileGoneSince;
     private long lastProfileSwitch;
     private boolean keyboardSeenInSearch;   // en este buscador ya estuvo el teclado abierto
     private boolean leaving;   // saliendo del buscador hacia el Inicio, con el reloj puesto
@@ -486,16 +488,25 @@ public class LimitService extends AccessibilityService {
             }
             // Perfil con pestaña Reels: en vez de un candado encima, un aviso que se va solo.
             AccessibilityNodeInfo profileReels = profileReelsTab(root);
+            long nowP = SystemClock.elapsedRealtime();
             if (profileReels != null) {
-                lastProfileSeen = SystemClock.elapsedRealtime();
-                if (!profileReelsNoticed) {
+                // Si entrás a la pestaña Reels (de un perfil o de los resultados de búsqueda),
+                // volvés a la primera pestaña de esa fila.
+                if (tabSelected(profileReels)) switchProfileToGrid(profileReels);
+            }
+            if (profileReels != null && !searchFieldVisible(root)) {
+                lastProfileSeen = nowP;
+                profileGoneSince = 0;
+                // Una vez por perfil, y nunca más seguido que cada 20 s.
+                if (!profileReelsNoticed && nowP - lastProfileNotice > 20_000) {
                     profileReelsNoticed = true;
+                    lastProfileNotice = nowP;
                     lockNotice.show();
                 }
-                // Si entrás a la pestaña Reels del perfil, volvés a la grilla de publicaciones.
-                if (tabSelected(profileReels)) switchProfileToGrid(profileReels);
-            } else {
-                profileReelsNoticed = false;
+            } else if (profileReelsNoticed) {
+                // Recién cuando saliste del perfil (unos segundos sin verlo) puede volver a avisar.
+                if (profileGoneSince == 0) profileGoneSince = nowP;
+                else if (nowP - profileGoneSince > 3000) profileReelsNoticed = false;
             }
             String msg = "Reels está bloqueado hasta mañana";
             place(blocker, reelsTabButton(root), root, true, msg);
