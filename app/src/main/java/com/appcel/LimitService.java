@@ -257,7 +257,42 @@ public class LimitService extends AccessibilityService {
      * Se busca ese botón por su id o por su nombre "Reels"; no se mira nada más.
      */
     private boolean reelsVisible(AccessibilityNodeInfo root) {
-        return reelsTabSelected(root) || reelsPlayerFullScreen(root);
+        if (!reelsTabSelected(root) && !reelsPlayerFullScreen(root)) return false;
+        // Carruseles y fotos que Instagram muestra dentro del reproductor no cuentan.
+        return !currentItemIsStill(root);
+    }
+
+    /**
+     * ¿Lo que se ve ahora en el reproductor es un carrusel o una foto (no un video)?
+     * Se decide solo por los nombres internos de los elementos ("carousel",
+     * "single_image", "photo"); no se mira la foto ni el video.
+     */
+    private static boolean currentItemIsStill(AccessibilityNodeInfo root) {
+        Rect screen = new Rect();
+        root.getBoundsInScreen(screen);
+        List<AccessibilityNodeInfo> items = root.findAccessibilityNodeInfosByViewId(IG + ":id/clips_media_component");
+        if (items == null) return false;
+        for (AccessibilityNodeInfo item : items) {
+            if (item == null || !item.isVisibleToUser()) continue;
+            Rect r = new Rect();
+            item.getBoundsInScreen(r);
+            if (!r.intersect(screen) || r.height() < screen.height() * 0.6f) continue;
+            return hasStillMedia(item, 0);
+        }
+        return false;
+    }
+
+    private static boolean hasStillMedia(AccessibilityNodeInfo n, int depth) {
+        if (n == null || depth > 4) return false;
+        String id = n.getViewIdResourceName();
+        if (id != null && depth > 0) {
+            String name = id.substring(id.indexOf('/') + 1);
+            if (name.contains("carousel") || name.contains("single_image") || name.contains("photo")) return true;
+        }
+        for (int i = 0; i < n.getChildCount() && i < 12; i++) {
+            if (hasStillMedia(n.getChild(i), depth + 1)) return true;
+        }
+        return false;
     }
 
     private boolean reelsTabSelected(AccessibilityNodeInfo root) {

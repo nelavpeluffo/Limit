@@ -2,7 +2,7 @@
 
 App para Android que limita a **15 minutos por día**:
 
-- los **Reels** de Instagram (la pestaña Reels y los que abrís desde la lupa, el feed o mensajes)
+- los **Reels de video** de Instagram (la pestaña Reels y los que abrís desde la lupa, el feed o mensajes). Las fotos y carruseles que aparecen en el reproductor no cuentan.
 - la pestaña **Para ti** de X (Twitter)
 
 El resto de Instagram y X (feed, historias, mensajes, la pestaña *Siguiendo*) se puede usar sin límite.
