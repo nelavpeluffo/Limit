@@ -15,7 +15,7 @@ import java.util.Locale;
 
 /**
  * Modo diagnóstico: durante unos minutos guarda el estado de los BOTONES DE
- * PESTAÑAS de Instagram y X (si están seleccionados, su id y su posición).
+ * PESTAÑAS de Instagram y X (y si está abierto el reproductor de Reels) (si están seleccionados, su id y su posición).
  * No guarda ningún texto ni nada más de la pantalla. Queda solo en el teléfono.
  */
 final class Diag {
@@ -29,6 +29,9 @@ final class Diag {
             LimitService.IG + ":id/direct_tab",
             LimitService.IG + ":id/creation_tab",
             LimitService.IG + ":id/profile_tab",
+            LimitService.IG_REELS_PLAYER_IDS[0],
+            LimitService.IG_REELS_PLAYER_IDS[1],
+            LimitService.IG_REELS_PLAYER_IDS[2],
     };
 
     private static long until;

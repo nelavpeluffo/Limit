@@ -28,6 +28,11 @@ public class LimitService extends AccessibilityService {
     static final String IG_REELS_TAB_ID = IG + ":id/clips_tab";
     static final String IG_HOME_TAB_ID = IG + ":id/feed_tab";
     static final String[] IG_REELS_LABEL = {"Reels"};
+    static final String[] IG_REELS_PLAYER_IDS = {
+            IG + ":id/clips_viewer_view_pager",
+            IG + ":id/clips_viewer_container",
+            IG + ":id/clips_video_container",
+    };
 
     static final String[] X_FOR_YOU = {"For you", "Para ti", "Para tí", "Para vos"};
     static final String[] X_FOLLOWING = {"Following", "Siguiendo"};
@@ -252,6 +257,10 @@ public class LimitService extends AccessibilityService {
      * Se busca ese botón por su id o por su nombre "Reels"; no se mira nada más.
      */
     private boolean reelsVisible(AccessibilityNodeInfo root) {
+        return reelsTabSelected(root) || reelsPlayerFullScreen(root);
+    }
+
+    private boolean reelsTabSelected(AccessibilityNodeInfo root) {
         List<AccessibilityNodeInfo> byId = root.findAccessibilityNodeInfosByViewId(IG_REELS_TAB_ID);
         if (byId != null && !byId.isEmpty()) {
             for (AccessibilityNodeInfo n : byId) {
@@ -261,6 +270,29 @@ public class LimitService extends AccessibilityService {
         }
         AccessibilityNodeInfo byName = findExact(root, IG_REELS_LABEL);
         return byName != null && tabSelected(byName);
+    }
+
+    /**
+     * Reels abiertos desde la lupa, el feed o un mensaje: Instagram los muestra en su
+     * reproductor de Reels a pantalla completa. Se busca ese reproductor solo por su
+     * nombre interno y su tamaño; no se mira su contenido.
+     */
+    private static boolean reelsPlayerFullScreen(AccessibilityNodeInfo root) {
+        Rect screen = new Rect();
+        root.getBoundsInScreen(screen);
+        if (screen.isEmpty()) return false;
+        for (String id : IG_REELS_PLAYER_IDS) {
+            List<AccessibilityNodeInfo> found = root.findAccessibilityNodeInfosByViewId(id);
+            if (found == null) continue;
+            for (AccessibilityNodeInfo n : found) {
+                if (n == null || !n.isVisibleToUser()) continue;
+                Rect r = new Rect();
+                n.getBoundsInScreen(r);
+                if (!r.intersect(screen)) continue;
+                if (r.width() >= screen.width() * 0.9f && r.height() >= screen.height() * 0.7f) return true;
+            }
+        }
+        return false;
     }
 
     /** X: pestaña "Para ti" seleccionada en el Inicio. */
