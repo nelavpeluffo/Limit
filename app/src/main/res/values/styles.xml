@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="brand">#1E6B52</color>
+    <color name="brand_dark">#154D3B</color>
+    <color name="ok">#1E8E3E</color>
+    <color name="warn">#C5221F</color>
+    <color name="muted">#5F6368</color>
+    <color name="card">#F1F4F2</color>
+
+    <style name="AppTheme" parent="@android:style/Theme.Material.Light.NoActionBar">
+        <item name="android:colorPrimary">@color/brand</item>
+        <item name="android:colorPrimaryDark">@color/brand_dark</item>
+        <item name="android:colorAccent">@color/brand</item>
+        <item name="android:windowBackground">@android:color/white</item>
+    </style>
+</resources>

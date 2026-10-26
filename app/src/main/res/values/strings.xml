@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">AppCel</string>
+    <string name="service_label">AppCel – límite de Reels y Para ti</string>
+    <string name="service_description">Detecta cuándo estás viendo Reels de Instagram o la pestaña Para ti de X, cuenta el tiempo y te saca de ahí cuando pasás los 15 minutos del día. No lee ni guarda tus mensajes ni publicaciones: solo mira qué pantalla está abierta.</string>
+</resources>
