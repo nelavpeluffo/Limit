@@ -166,14 +166,14 @@ final class Diag {
         if (n.isScrollable()) {
             StringBuilder dirs = new StringBuilder();
             for (AccessibilityNodeInfo.AccessibilityAction a : n.getActionList()) {
-                int id = a.getId();
-                if (id == android.R.id.accessibilityActionScrollLeft) dirs.append('←');
-                if (id == android.R.id.accessibilityActionScrollRight) dirs.append('→');
-                if (id == android.R.id.accessibilityActionScrollUp) dirs.append('↑');
-                if (id == android.R.id.accessibilityActionScrollDown) dirs.append('↓');
+                int aid = a.getId();
+                if (aid == android.R.id.accessibilityActionScrollLeft) dirs.append('←');
+                if (aid == android.R.id.accessibilityActionScrollRight) dirs.append('→');
+                if (aid == android.R.id.accessibilityActionScrollUp) dirs.append('↑');
+                if (aid == android.R.id.accessibilityActionScrollDown) dirs.append('↓');
                 if (android.os.Build.VERSION.SDK_INT >= 29) {
-                    if (id == android.R.id.accessibilityActionPageLeft) dirs.append("p←");
-                    if (id == android.R.id.accessibilityActionPageRight) dirs.append("p→");
+                    if (aid == android.R.id.accessibilityActionPageLeft) dirs.append("p←");
+                    if (aid == android.R.id.accessibilityActionPageRight) dirs.append("p→");
                 }
             }
             sb.append(" [scroll ").append(dirs).append(']');
