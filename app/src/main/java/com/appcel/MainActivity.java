@@ -16,6 +16,9 @@ import android.widget.TextView;
 
 public class MainActivity extends Activity {
 
+    private static final String LATEST_APK_URL =
+            "https://github.com/nelavpeluffo/Limit/releases/latest/download/Limit.apk";
+
     private final Handler handler = new Handler(Looper.getMainLooper());
     private final Runnable refresh = new Runnable() {
         @Override
@@ -48,6 +51,20 @@ public class MainActivity extends Activity {
         findViewById(R.id.btn_app_info).setOnClickListener(v ->
                 startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
                         Uri.fromParts("package", getPackageName(), null))));
+
+        TextView versionText = findViewById(R.id.version_text);
+        versionText.setText("Versión instalada: " + installedVersion()
+                + "\nEl botón descarga la versión más nueva con el navegador. "
+                + "Cuando termine, abrí el archivo y tocá «Actualizar» o «Instalar». "
+                + "No hace falta volver a activarla.");
+        findViewById(R.id.btn_update).setOnClickListener(v -> {
+            try {
+                startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(LATEST_APK_URL)));
+            } catch (Exception e) {
+                android.widget.Toast.makeText(this, "No encontré un navegador para descargarla",
+                        android.widget.Toast.LENGTH_LONG).show();
+            }
+        });
 
         diagStatus = findViewById(R.id.diag_status);
         diagButton = findViewById(R.id.btn_diag);
@@ -117,6 +134,14 @@ public class MainActivity extends Activity {
         text.setText(name + ": " + Usage.format(used) + " de 15:00"
                 + (remaining == 0 ? "  (límite alcanzado)" : "  (quedan " + Usage.format(remaining) + ")"));
         bar.setProgress((int) (used / 1000));
+    }
+
+    private String installedVersion() {
+        try {
+            return getPackageManager().getPackageInfo(getPackageName(), 0).versionName;
+        } catch (Exception e) {
+            return "?";
+        }
     }
 
     private boolean isServiceEnabled() {

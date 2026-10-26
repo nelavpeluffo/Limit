@@ -22,6 +22,10 @@ El resto de Instagram y X (feed, historias, mensajes, la pestaña *Siguiendo*) s
 3. Abrí Limit y seguí los pasos de la pantalla para activarla en **Accesibilidad**.
 4. Si Android dice **«Configuración restringida»**: en Limit tocá «Abrir info de la app» → menú ⋮ arriba a la derecha → «Permitir configuración restringida». Después volvé a activarla en Accesibilidad.
 
+## Actualizar
+
+En Limit, tocá **Descargar la última versión**, abrí el archivo y tocá **Actualizar**. No hace falta volver a activarla.
+
 ## Privacidad
 
 La app no tiene permiso de internet. Solo busca los botones de las pestañas (Reels en Instagram; Para ti / Siguiendo en X) para saber cuál está seleccionada. No recorre el resto de la pantalla, no lee publicaciones ni mensajes y no guarda nada de lo que ves. El modo diagnóstico tampoco guarda textos: solo si esos botones están seleccionados.
