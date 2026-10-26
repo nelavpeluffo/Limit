@@ -14,7 +14,7 @@ import android.widget.Toast;
 
 /**
  * Tapa lila con un candado que se pone justo encima del botón de Reels
- * cuando ya se usaron los 15 minutos del día. Se "come" los toques, así
+ * (Instagram) o de la pestaña Para ti (X) cuando ya se usaron los 15 minutos del día. Se "come" los toques, así
  * que el botón deja de funcionar hasta la medianoche.
  */
 final class Blocker {
@@ -23,13 +23,15 @@ final class Blocker {
     private FrameLayout view;
     private boolean shown;
     private final Rect current = new Rect();
+    private String message = "";
 
     Blocker(AccessibilityService service) {
         this.service = service;
         this.wm = (WindowManager) service.getSystemService(Context.WINDOW_SERVICE);
     }
 
-    void show(Rect bounds) {
+    void show(Rect bounds, String message) {
+        this.message = message;
         if (shown && bounds.equals(current)) return;
         if (view == null) view = build();
 
@@ -79,7 +81,7 @@ final class Blocker {
         FrameLayout outer = new FrameLayout(service);
         outer.setClickable(true);
         outer.setOnClickListener(v -> Toast.makeText(service.getApplicationContext(),
-                "Reels está bloqueado hasta mañana", Toast.LENGTH_SHORT).show());
+                message, Toast.LENGTH_SHORT).show());
 
         FrameLayout box = new FrameLayout(service);
         GradientDrawable bg = new GradientDrawable();

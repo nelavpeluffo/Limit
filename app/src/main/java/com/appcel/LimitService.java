@@ -76,12 +76,13 @@ public class LimitService extends AccessibilityService {
         if (usage == null || e == null) return;
         CharSequence pkg = e.getPackageName();
         if (pkg != null && X.contentEquals(pkg)) trackXEvent(e);
-        if (pkg != null && IG.contentEquals(pkg)) {
+        if (pkg != null) {
             // Reaccionar enseguida (sin esperar al próximo segundo) para tapar el botón a tiempo.
             try {
                 AccessibilityNodeInfo root = getRootInActiveWindow();
-                if (root != null && root.getPackageName() != null && IG.contentEquals(root.getPackageName())) {
-                    updateBlocker(root);
+                if (root != null && root.getPackageName() != null) {
+                    String rootPkg = root.getPackageName().toString();
+                    if (rootPkg.contentEquals(pkg)) updateBlocker(root, rootPkg);
                 }
             } catch (Exception ignored) {
             }
@@ -128,7 +129,7 @@ public class LimitService extends AccessibilityService {
         long now = SystemClock.elapsedRealtime();
         Kind k = detect();
 
-        if (IG.equals(lastPkg)) updateBlocker(lastRoot);
+        if (lastPkg != null) updateBlocker(lastRoot, lastPkg);
         else blocker.hide();
         if (blocker.isShown()) lastActive = now;
 
@@ -210,17 +211,29 @@ public class LimitService extends AccessibilityService {
         return Kind.NONE;
     }
 
-    /** Pone o saca la tapa con candado sobre el botón de Reels. */
-    private void updateBlocker(AccessibilityNodeInfo root) {
-        if (root == null || usage.remaining(Kind.REELS) > 0) {
-            blocker.hide();
-            return;
+    /** Pone o saca la tapa con candado sobre el botón de Reels o de Para ti. */
+    private void updateBlocker(AccessibilityNodeInfo root, String pkg) {
+        AccessibilityNodeInfo tab = null;
+        String msg = null;
+        if (root != null && IG.equals(pkg) && usage.remaining(Kind.REELS) <= 0) {
+            tab = reelsTabButton(root);
+            msg = "Reels está bloqueado hasta mañana";
+        } else if (root != null && X.equals(pkg) && usage.remaining(Kind.FOR_YOU) <= 0) {
+            tab = clickableUp(findExact(root, X_FOR_YOU));
+            msg = "Para ti está bloqueado hasta mañana";
         }
-        AccessibilityNodeInfo tab = reelsTabButton(root);
         Rect r = new Rect();
         if (tab != null && tab.isVisibleToUser()) tab.getBoundsInScreen(r);
         if (r.width() < 10 || r.height() < 10) blocker.hide();
-        else blocker.show(r);
+        else blocker.show(r, msg);
+    }
+
+    private static AccessibilityNodeInfo clickableUp(AccessibilityNodeInfo n) {
+        for (int i = 0; n != null && i < 4; i++) {
+            if (n.isClickable()) return n;
+            n = n.getParent();
+        }
+        return null;
     }
 
     /** El botón de la pestaña Reels de la barra de abajo de Instagram. */
@@ -231,12 +244,7 @@ public class LimitService extends AccessibilityService {
                 if (n != null && n.isVisibleToUser()) return n;
             }
         }
-        AccessibilityNodeInfo n = findExact(root, IG_REELS_LABEL);
-        for (int i = 0; n != null && i < 4; i++) {
-            if (n.isClickable()) return n;
-            n = n.getParent();
-        }
-        return null;
+        return clickableUp(findExact(root, IG_REELS_LABEL));
     }
 
     /**
