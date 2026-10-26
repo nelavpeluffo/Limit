@@ -100,15 +100,27 @@ final class Overlay {
         float d = service.getResources().getDisplayMetrics().density;
         if (frame == null) {
             frame = new GlowFrame(service, GLOW_RADIUS_DP * d);
+            // Margen solo arriba y abajo: a los costados la ventana ocupa todo el ancho
+            // de la pantalla, así el texto no se achica ni se parte en dos líneas.
             int pad = (int) (GLOW_PAD_DP * d);
-            frame.setPadding(pad, pad, pad, pad);
+            frame.setPadding(0, pad, 0, pad);
+            frame.setClipToPadding(false);
+            frame.setClipChildren(false);
             pill = new TextView(service);
             pill.setTextColor(Color.WHITE);
             pill.setTextSize(13);
+            pill.setSingleLine(true);
+            pill.setMaxLines(1);
+            pill.setEllipsize(android.text.TextUtils.TruncateAt.END);
             int ph = (int) (12 * d), pv = (int) (5 * d);
             pill.setPadding(ph, pv, ph, pv);
-            frame.addView(pill, new FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT));
+            FrameLayout.LayoutParams plp = new FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT,
+                    Gravity.CENTER_HORIZONTAL);
+            int side = (int) (16 * d);
+            plp.leftMargin = side;
+            plp.rightMargin = side;
+            frame.addView(pill, plp);
         }
         GradientDrawable bg = new GradientDrawable();
         bg.setColor(color);
@@ -118,7 +130,7 @@ final class Overlay {
 
         if (!shown) {
             WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
-                    WindowManager.LayoutParams.WRAP_CONTENT,
+                    WindowManager.LayoutParams.MATCH_PARENT,
                     WindowManager.LayoutParams.WRAP_CONTENT,
                     WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
                     WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
@@ -195,15 +207,16 @@ final class Overlay {
             rect.set(child.getLeft(), child.getTop(), child.getRight(), child.getBottom());
             float r = rect.height() / 2f;
             int base = color & 0x00FFFFFF;
-            // Halo amplio (dos pasadas para que sea más intenso)…
+            // Todo en violeta: la intensidad sale de superponer capas, no de aclarar
+            // el color (si no, el brillo se ve blanco).
             wide.setColor(withAlpha(base, glow));
             canvas.drawRoundRect(rect, r, r, wide);
             canvas.drawRoundRect(rect, r, r, wide);
-            // …halo intermedio más claro…
-            mid.setColor(withAlpha(lighten(base, 0.35f), glow));
+            canvas.drawRoundRect(rect, r, r, wide);
+            mid.setColor(withAlpha(base, glow));
             canvas.drawRoundRect(rect, r, r, mid);
-            // …y un borde brillante casi blanco.
-            core.setColor(withAlpha(lighten(base, 0.7f), glow));
+            canvas.drawRoundRect(rect, r, r, mid);
+            core.setColor(withAlpha(base, glow));
             canvas.drawRoundRect(rect, r, r, core);
         }
     }
