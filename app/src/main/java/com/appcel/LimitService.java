@@ -225,7 +225,7 @@ public class LimitService extends AccessibilityService {
      * pantalla (sin esperar a la revisión de cada segundo).
      */
     private void quickCheckX() {
-        if (Diag.recording() || usage.remaining(Kind.FOR_YOU) > 0) return;
+        if (usage.remaining(Kind.FOR_YOU) > 0) return;
         long now = SystemClock.elapsedRealtime();
         if (now - lastQuickCheck < 150) return;
         lastQuickCheck = now;
@@ -305,6 +305,11 @@ public class LimitService extends AccessibilityService {
                 lastDiagKind = k;
                 lastDiagAt = now;
             }
+        }
+        // En X, con el límite cumplido, el límite sigue funcionando aunque se esté
+        // grabando un diagnóstico (así queda registrado cómo te pasa a Siguiendo).
+        boolean xLimitLive = X.equals(lastPkg) && usage.remaining(Kind.FOR_YOU) <= 0;
+        if (Diag.recording() && lastPkg != null && !xLimitLive) {
             String what = k == Kind.NONE ? "nada" : k.label;
             overlay.show("Diagnóstico · detecto: " + what, false);
             prevKind = k;
