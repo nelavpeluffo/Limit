@@ -80,7 +80,22 @@ public class LimitService extends AccessibilityService {
     public void onAccessibilityEvent(AccessibilityEvent e) {
         if (usage == null || e == null) return;
         CharSequence pkg = e.getPackageName();
-        if (pkg != null && X.contentEquals(pkg)) trackXEvent(e);
+        boolean target = pkg != null && (IG.contentEquals(pkg) || X.contentEquals(pkg));
+        if (!target) {
+            // Otra app pasó al frente (inicio del teléfono, otra app...): solo se mira
+            // cuál app está abierta, para sacar el candado y el contador al instante.
+            if (e.getEventType() == AccessibilityEvent.TYPE_WINDOW_STATE_CHANGED) {
+                hideIfLeft();
+                // Durante la animación de cierre Instagram puede seguir figurando unos instantes.
+                handler.postDelayed(this::hideIfLeft, 150);
+                handler.postDelayed(this::hideIfLeft, 400);
+            }
+            return;
+        }
+        if (X.contentEquals(pkg)) trackXEvent(e);
+        if (IG.contentEquals(pkg) && e.getEventType() == AccessibilityEvent.TYPE_VIEW_LONG_CLICKED) {
+            onInstagramLongPress(e);
+        }
         if (pkg != null) {
             // Reaccionar enseguida (sin esperar al próximo segundo) para tapar el botón a tiempo.
             try {
@@ -93,6 +108,77 @@ public class LimitService extends AccessibilityService {
             }
         }
         startTicking();
+    }
+
+    private void hideIfLeft() {
+        try {
+            AccessibilityNodeInfo root = getRootInActiveWindow();
+            CharSequence p = root == null ? null : root.getPackageName();
+            if (p != null && (IG.contentEquals(p) || X.contentEquals(p))) return;
+        } catch (Exception ignored) {
+        }
+        blocker.hide();
+        overlay.hide();
+    }
+
+    /**
+     * Mantener apretado un Reel en la grilla de la lupa abre una previsualización que
+     * lo reproduce. Con el límite cumplido, se cierra enseguida. Se reconoce que es un
+     * Reel porque su miniatura tiene el contador de reproducciones.
+     */
+    private void onInstagramLongPress(AccessibilityEvent e) {
+        AccessibilityNodeInfo src;
+        try {
+            src = e.getSource();
+        } catch (Exception ex) {
+            return;
+        }
+        boolean reel = isReelTile(src);
+        if (Diag.recording()) {
+            String id = src == null ? null : src.getViewIdResourceName();
+            Diag.note(this, "mantener apretado en " + (id == null ? "?" : id.substring(id.indexOf('/') + 1))
+                    + " → " + (reel ? "es un Reel" : "no es un Reel"));
+        }
+        if (usage.remaining(Kind.REELS) > 0 || !reel) return;
+        toast("Reels está bloqueado hasta mañana");
+        handler.postDelayed(() -> performGlobalAction(GLOBAL_ACTION_BACK), 300);
+        handler.postDelayed(this::closeLeftoverPreview, 1200);
+    }
+
+    /** Si la previsualización sigue abierta (sigue habiendo un video), otro "atrás". */
+    private void closeLeftoverPreview() {
+        try {
+            AccessibilityNodeInfo root = getRootInActiveWindow();
+            if (root == null || root.getPackageName() == null || !IG.contentEquals(root.getPackageName())) return;
+            List<AccessibilityNodeInfo> grid = root.findAccessibilityNodeInfosByViewId(IG + ":id/recycler_view");
+            boolean gridVisible = false;
+            if (grid != null) for (AccessibilityNodeInfo g : grid) if (g != null && g.isVisibleToUser()) gridVisible = true;
+            List<AccessibilityNodeInfo> video = root.findAccessibilityNodeInfosByViewId(IG + ":id/clips_video_container");
+            boolean videoVisible = false;
+            if (video != null) for (AccessibilityNodeInfo v : video) if (v != null && v.isVisibleToUser()) videoVisible = true;
+            if (videoVisible && gridVisible) performGlobalAction(GLOBAL_ACTION_BACK);
+        } catch (Exception ignored) {
+        }
+    }
+
+    private static boolean isReelTile(AccessibilityNodeInfo n) {
+        for (int level = 0; n != null && level < 3; level++) {
+            if (hasPlayCount(n, 0)) return true;
+            n = n.getParent();
+        }
+        return false;
+    }
+
+    private static boolean hasPlayCount(AccessibilityNodeInfo n, int depth) {
+        if (n == null || depth > 2) return false;
+        String id = n.getViewIdResourceName();
+        if (id != null && (id.endsWith("/play_count_container") || id.endsWith("/play_count_logo"))) return true;
+        // No subir hasta la grilla entera: solo dentro de la miniatura.
+        if (id != null && id.endsWith("/recycler_view")) return false;
+        for (int i = 0; i < n.getChildCount() && i < 6; i++) {
+            if (hasPlayCount(n.getChild(i), depth + 1)) return true;
+        }
+        return false;
     }
 
     @Override

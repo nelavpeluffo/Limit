@@ -13,6 +13,7 @@ El resto de Instagram y X (feed, historias, mensajes, la pestaña *Siguiendo*) s
 - Cuando falta 1 minuto, te avisa.
 - Al llegar a 15 minutos te saca: en Instagram te lleva al Inicio y en X te pasa a *Siguiendo*. Si insistís, te manda a la pantalla de inicio del teléfono.
 - Además, el botón de Reels (Instagram) y la pestaña Para ti (X) quedan tapados con un candado lila y no responden hasta la medianoche.
+- Con el límite cumplido, mantener apretado un Reel en la grilla de la lupa cierra la previsualización.
 - El contador se reinicia a la medianoche.
 
 ## Instalarla
@@ -28,7 +29,7 @@ Con [Obtainium](https://github.com/ImranR98/Obtainium) (agregando `https://githu
 
 ## Privacidad
 
-La app no tiene permiso de internet. Solo busca los botones de las pestañas (Reels en Instagram; Para ti / Siguiendo en X) para saber cuál está seleccionada, y en Instagram si está abierto el reproductor de Reels a pantalla completa (por su nombre interno y tamaño, sin mirar el video). No recorre el resto de la pantalla, no lee publicaciones ni mensajes y no guarda nada de lo que ves. El modo diagnóstico tampoco guarda textos: solo si esos botones están seleccionados.
+La app no tiene permiso de internet. Solo busca los botones de las pestañas (Reels en Instagram; Para ti / Siguiendo en X) para saber cuál está seleccionada, y en Instagram si está abierto el reproductor de Reels a pantalla completa (por su nombre interno y tamaño, sin mirar el video). De las demás apps solo sabe cuál está abierta (para sacar el candado al instante cuando salís). No recorre el resto de la pantalla, no lee publicaciones ni mensajes y no guarda nada de lo que ves. El modo diagnóstico tampoco guarda textos: solo si esos botones están seleccionados.
 
 ## Compilación
 

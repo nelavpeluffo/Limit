@@ -64,6 +64,15 @@ final class Diag {
         return file(c).length() > 0;
     }
 
+    static void note(Context c, String text) {
+        File f = file(c);
+        if (f.length() > MAX_BYTES) return;
+        try (FileWriter w = new FileWriter(f, true)) {
+            w.write("\n>>> " + new SimpleDateFormat("HH:mm:ss", Locale.US).format(new Date()) + "  " + text + "\n");
+        } catch (IOException ignored) {
+        }
+    }
+
     static void record(Context c, String pkg, Kind detected, AccessibilityNodeInfo root) {
         File f = file(c);
         if (f.length() > MAX_BYTES || root == null) return;
