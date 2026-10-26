@@ -55,6 +55,7 @@ public class LimitService extends AccessibilityService {
     private Blocker backCatcher;   // zona invisible sobre la flecha de atrás del buscador
     private boolean holdingBack;
     private boolean exploreCheckQueued;
+    private int homeStable;   // revisiones seguidas con el Inicio ya puesto
     private long searchFlowUntil;
     private long exploreRedirectUntil;
     private boolean xCovered;
@@ -495,7 +496,8 @@ public class LimitService extends AccessibilityService {
             AccessibilityNodeInfo r = getRootInActiveWindow();
             if (r == null || !clickHome(r)) performGlobalAction(GLOBAL_ACTION_BACK);
             // El reloj queda hasta confirmar que ya estás en el Inicio.
-            handler.postDelayed(() -> hideCoverWhenHome(0), 150);
+            homeStable = 0;
+        handler.postDelayed(() -> hideCoverWhenHome(0), 150);
         });
     }
 
@@ -531,7 +533,19 @@ public class LimitService extends AccessibilityService {
         searchFlowUntil = 0;
         exploreRedirectUntil = SystemClock.elapsedRealtime() + 6000;   // este camino se encarga
         backCatcher.hide();
-        cover.show(() -> leaveStep(0));
+        homeStable = 0;
+        cover.show(() -> leaveStep(0), 140);   // aparece con un fundido corto
+    }
+
+    /**
+     * El Inicio ya está puesto: el reloj se queda un momento más para que termine de
+     * dibujarse y después se desvanece suave, dejando ver el Inicio.
+     */
+    private void revealHome() {
+        handler.postDelayed(() -> {
+            cover.fadeOut(320);
+            handler.postDelayed(() -> exploreRedirectUntil = 0, 400);
+        }, 350);
     }
 
     private void leaveStep(int attempt) {
@@ -542,8 +556,9 @@ public class LimitService extends AccessibilityService {
             boolean grid = exploreGridVisible(root);
             boolean search = searchFieldVisible(root);
             if (attempt > 0 && homeSelected(root) && !grid && !search) {
-                finishLeave(250);   // un instante más para que el Inicio termine de dibujarse
-                return;
+                if (++homeStable >= 2) { revealHome(); return; }
+            } else {
+                homeStable = 0;
             }
             if (attempt == 0 || grid && attempt % 3 == 0) clickHome(root);
             // Si tocar Inicio no alcanzó (teclado abierto, por ejemplo), ir atrás con el reloj puesto.
@@ -571,10 +586,10 @@ public class LimitService extends AccessibilityService {
             if (home != null) for (AccessibilityNodeInfo h : home) {
                 if (h != null && h.isVisibleToUser()) homeSelected |= h.isSelected() || isSelectedDown(h, 2);
             }
-            if (homeSelected && !exploreGridVisible(root)) {
-                // Un instante más para que el Inicio termine de dibujarse.
-                handler.postDelayed(cover::hide, 250);
-                return;
+            if (homeSelected && !exploreGridVisible(root) && !searchFieldVisible(root)) {
+                if (++homeStable >= 2) { revealHome(); return; }
+            } else {
+                homeStable = 0;
             }
             // Si a los ~1,2 s sigue en la lupa, volver a tocar Inicio.
             if (attempt == 8 && home != null && !home.isEmpty()) clickUp(home.get(0));

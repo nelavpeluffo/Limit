@@ -53,8 +53,20 @@ final class Cover {
         show(null);
     }
 
-    /** Muestra el reloj; onShown corre cuando ya está dibujado en pantalla. */
     void show(Runnable onShown) {
+        show(onShown, 0);
+    }
+
+    /**
+     * Muestra el reloj (con un fundido de fadeInMs, o de golpe si es 0); onShown corre
+     * cuando ya tapa la pantalla por completo.
+     */
+    void show(Runnable onShown, long fadeInMs) {
+        if (shown && view.getAlpha() < 1f) {
+            // Se estaba yendo con el fundido: vuelve a aparecer entero.
+            view.animate().cancel();
+            view.setAlpha(1f);
+        }
         Runnable once = onShown == null ? null : new Runnable() {
             boolean done;
             @Override public void run() {
@@ -72,11 +84,21 @@ final class Cover {
             return;
         }
         shown = true;
-        view.setAlpha(1f);
-        if (once != null) {
-            // Dos cuadros después ya está en pantalla; por las dudas, igual a los 150 ms.
-            view.postOnAnimation(() -> view.postOnAnimation(once));
-            view.postDelayed(once, 150);
+        view.animate().cancel();
+        if (fadeInMs > 0) {
+            view.setAlpha(0f);
+            view.animate().alpha(1f).setDuration(fadeInMs)
+                    .setInterpolator(new android.view.animation.DecelerateInterpolator())
+                    .withEndAction(() -> { if (once != null) view.postOnAnimation(once); })
+                    .start();
+            if (once != null) view.postDelayed(once, fadeInMs + 200);
+        } else {
+            view.setAlpha(1f);
+            if (once != null) {
+                // Dos cuadros después ya está en pantalla; por las dudas, igual a los 150 ms.
+                view.postOnAnimation(() -> view.postOnAnimation(once));
+                view.postDelayed(once, 150);
+            }
         }
         anim = ValueAnimator.ofFloat(0f, 1f);
         anim.setDuration(1800);   // una vuelta cada 1,8 s
@@ -90,7 +112,18 @@ final class Cover {
         return shown;
     }
 
+    /** Se va con un fundido suave, dejando ver lo que quedó abajo (el Inicio). */
+    void fadeOut(long ms) {
+        if (!shown) return;
+        view.animate().cancel();
+        view.animate().alpha(0f).setDuration(ms)
+                .setInterpolator(new android.view.animation.AccelerateDecelerateInterpolator())
+                .withEndAction(() -> { if (shown && view.getAlpha() == 0f) hide(); })
+                .start();
+    }
+
     void hide() {
+        if (view != null) view.animate().cancel();
         if (anim != null) {
             anim.cancel();
             anim = null;
