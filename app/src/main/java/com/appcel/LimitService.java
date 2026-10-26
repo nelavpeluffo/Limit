@@ -64,7 +64,7 @@ public class LimitService extends AccessibilityService {
     // Aviso "Seguidos" después de pasarte de Para ti con las pestañas escondidas.
     private long noticeUntil;
     private final Runnable noticeToViolet = () -> {
-        if (SystemClock.elapsedRealtime() < noticeUntil) overlay.show("Seguidos", Overlay.VIOLET);
+        if (SystemClock.elapsedRealtime() < noticeUntil) overlay.showGlowing("Siguiendo", Overlay.VIOLET);
     };
     private final Runnable noticeEnd = () -> {
         noticeUntil = 0;
@@ -221,16 +221,16 @@ public class LimitService extends AccessibilityService {
 
     /**
      * Te pasamos a Siguiendo sin que se vieran las pestañas: la pastillita roja de
-     * "límite alcanzado" queda 2,5 s y después se vuelve violeta y dice "Seguidos",
-     * como aviso del cambio de pestaña. Después desaparece.
+     * "límite alcanzado" queda 2,5 s y después se vuelve violeta, con brillo, y dice
+     * "Siguiendo" durante 4 s, como aviso del cambio de pestaña. Después desaparece.
      */
     private void startSwitchNotice() {
         handler.removeCallbacks(noticeToViolet);
         handler.removeCallbacks(noticeEnd);
-        noticeUntil = SystemClock.elapsedRealtime() + 4500;
+        noticeUntil = SystemClock.elapsedRealtime() + 6500;
         overlay.show(Kind.FOR_YOU.label + ": límite de hoy alcanzado", true);
-        handler.postDelayed(noticeToViolet, 2500);
-        handler.postDelayed(noticeEnd, 4500);
+        handler.postDelayed(noticeToViolet, 2500);   // roja 2,5 s…
+        handler.postDelayed(noticeEnd, 6500);        // …y violeta con brillo 4 s
     }
 
     private void cancelNotice() {
