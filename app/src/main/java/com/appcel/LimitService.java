@@ -220,7 +220,7 @@ public class LimitService extends AccessibilityService {
     }
 
     /**
-     * Te pasamos a Siguiendo sin que se vieran las pestañas: la pastillita roja de
+     * Te pasamos de Para ti a Siguiendo: la pastillita roja de
      * "límite alcanzado" queda 2,5 s y después se vuelve violeta, con brillo, y dice
      * "Siguiendo" durante 4 s, como aviso del cambio de pestaña. Después desaparece.
      */
@@ -307,7 +307,8 @@ public class LimitService extends AccessibilityService {
 
             long remaining = usage.remaining(k);
             if (remaining <= 0) {
-                overlay.show(k.label + ": límite de hoy alcanzado", true);
+                // En X la pastillita roja (y después la violeta) la maneja el aviso de cambio.
+                if (k == Kind.REELS) overlay.show(k.label + ": límite de hoy alcanzado", true);
                 enforce(k);
             } else {
                 enforceStreak = 0;
@@ -380,15 +381,8 @@ public class LimitService extends AccessibilityService {
             return;
         }
         searchBlocker.hide();
-        if (root != null && X.equals(pkg) && usage.remaining(Kind.FOR_YOU) <= 0) {
-            Rect screen = new Rect();
-            root.getBoundsInScreen(screen);
-            List<AccessibilityNodeInfo> tabs = xTopTabs(root, screen);
-            AccessibilityNodeInfo forYouTab = tabs != null ? tabs.get(0) : clickableUp(findExact(root, X_FOR_YOU));
-            place(blocker, forYouTab, root, false, "Para ti está bloqueado hasta mañana");
-        } else {
-            blocker.hide();
-        }
+        // En X no se pone candado: al cumplir el límite se pasa a Siguiendo.
+        blocker.hide();
     }
 
     private static void place(Blocker b, AccessibilityNodeInfo tab, AccessibilityNodeInfo root,
@@ -728,7 +722,7 @@ public class LimitService extends AccessibilityService {
         if (now - lastEnforce < gap) return;
         if (now - lastEnforce > 15_000) {
             enforceStreak = 0;
-            toast("Ya usaste tus 15 minutos de " + k.label + " de hoy");
+            if (k == Kind.REELS) toast("Ya usaste tus 15 minutos de " + k.label + " de hoy");
         }
         lastEnforce = now;
         enforceStreak++;
@@ -742,6 +736,8 @@ public class LimitService extends AccessibilityService {
 
         AccessibilityNodeInfo root = getRootInActiveWindow();
         if (k == Kind.FOR_YOU) {
+            // Pastillita roja al instante; a los 2,5 s pasa a la violeta "Siguiendo".
+            if (now >= noticeUntil) startSwitchNotice();
             if (root != null) {
                 Rect screen = new Rect();
                 root.getBoundsInScreen(screen);
@@ -765,7 +761,6 @@ public class LimitService extends AccessibilityService {
                 // (Siguiendo), como si deslizaras el dedo hacia la izquierda.
                 if (pageToFollowing(root)) {
                     setForYou(false);
-                    startSwitchNotice();
                     return;
                 }
                 // Si no se pudo: subir un poco el timeline para que X muestre las pestañas
@@ -793,10 +788,7 @@ public class LimitService extends AccessibilityService {
             Rect screen = new Rect();
             root.getBoundsInScreen(screen);
             List<AccessibilityNodeInfo> tabs = xTopTabs(root, screen);
-            if (tabs != null && tabs.size() >= 2 && clickUp(tabs.get(1))) {
-                setForYou(false);
-                startSwitchNotice();
-            }
+            if (tabs != null && tabs.size() >= 2 && clickUp(tabs.get(1))) setForYou(false);
         } catch (Exception ignored) {
         }
     }
