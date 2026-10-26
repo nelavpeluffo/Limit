@@ -23,8 +23,8 @@ final class Overlay {
     static final int RED = 0xE6C5221F;
     static final int VIOLET = 0xFF9364FF;
 
-    private static final int GLOW_PAD_DP = 22;   // espacio alrededor para que entre el brillo
-    private static final int GLOW_RADIUS_DP = 14;
+    private static final int GLOW_PAD_DP = 62;   // espacio alrededor para que entre el brillo
+    private static final int GLOW_RADIUS_DP = 42; // el triple que antes (14)
 
     private final AccessibilityService service;
     private final WindowManager wm;
@@ -65,7 +65,7 @@ final class Overlay {
             @Override
             public void onAnimationEnd(android.animation.Animator animation) {
                 if (glowAnim != in) return;
-                ValueAnimator breathe = ValueAnimator.ofFloat(1f, 0.65f);
+                ValueAnimator breathe = ValueAnimator.ofFloat(1f, 0.8f);
                 breathe.setDuration(1100);
                 breathe.setRepeatMode(ValueAnimator.REVERSE);
                 breathe.setRepeatCount(ValueAnimator.INFINITE);
@@ -143,9 +143,14 @@ final class Overlay {
         return id > 0 ? service.getResources().getDimensionPixelSize(id) : 0;
     }
 
-    /** Contenedor que dibuja un brillo difuso por fuera del borde de la pastillita. */
+    /**
+     * Contenedor que dibuja un brillo difuso por fuera del borde de la pastillita:
+     * un halo amplio, uno intermedio más claro y uno pegado al borde casi blanco,
+     * para que se note sobre cualquier fondo.
+     */
     private static final class GlowFrame extends FrameLayout {
-        private final Paint paint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint wide = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint mid = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint core = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final RectF rect = new RectF();
         private float glow;
@@ -156,8 +161,9 @@ final class Overlay {
             setWillNotDraw(false);
             // El desenfoque necesita dibujarse por software.
             setLayerType(View.LAYER_TYPE_SOFTWARE, null);
-            paint.setMaskFilter(new BlurMaskFilter(radius, BlurMaskFilter.Blur.OUTER));
-            core.setMaskFilter(new BlurMaskFilter(radius * 0.45f, BlurMaskFilter.Blur.OUTER));
+            wide.setMaskFilter(new BlurMaskFilter(radius, BlurMaskFilter.Blur.OUTER));
+            mid.setMaskFilter(new BlurMaskFilter(radius * 0.5f, BlurMaskFilter.Blur.OUTER));
+            core.setMaskFilter(new BlurMaskFilter(radius * 0.2f, BlurMaskFilter.Blur.OUTER));
         }
 
         void setGlow(float g) {
@@ -169,6 +175,18 @@ final class Overlay {
             color = c;
         }
 
+        private static int lighten(int c, float f) {
+            int r = (c >> 16) & 0xFF, g = (c >> 8) & 0xFF, b = c & 0xFF;
+            r = Math.round(r + (255 - r) * f);
+            g = Math.round(g + (255 - g) * f);
+            b = Math.round(b + (255 - b) * f);
+            return (r << 16) | (g << 8) | b;
+        }
+
+        private static int withAlpha(int rgb, float a) {
+            return (Math.round(255 * Math.max(0f, Math.min(1f, a))) << 24) | (rgb & 0x00FFFFFF);
+        }
+
         @Override
         protected void onDraw(Canvas canvas) {
             super.onDraw(canvas);
@@ -176,12 +194,16 @@ final class Overlay {
             View child = getChildAt(0);
             rect.set(child.getLeft(), child.getTop(), child.getRight(), child.getBottom());
             float r = rect.height() / 2f;
-            int rgb = color & 0x00FFFFFF;
-            // Halo amplio y suave…
-            paint.setColor(rgb | (Math.round(255 * 0.85f * glow) << 24));
-            canvas.drawRoundRect(rect, r, r, paint);
-            // …y uno más intenso pegado al borde.
-            core.setColor(rgb | (Math.round(255 * glow) << 24));
+            int base = color & 0x00FFFFFF;
+            // Halo amplio (dos pasadas para que sea más intenso)…
+            wide.setColor(withAlpha(base, glow));
+            canvas.drawRoundRect(rect, r, r, wide);
+            canvas.drawRoundRect(rect, r, r, wide);
+            // …halo intermedio más claro…
+            mid.setColor(withAlpha(lighten(base, 0.35f), glow));
+            canvas.drawRoundRect(rect, r, r, mid);
+            // …y un borde brillante casi blanco.
+            core.setColor(withAlpha(lighten(base, 0.7f), glow));
             canvas.drawRoundRect(rect, r, r, core);
         }
     }
