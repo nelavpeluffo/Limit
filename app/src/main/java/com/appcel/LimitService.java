@@ -587,19 +587,32 @@ public class LimitService extends AccessibilityService {
      * tarjeta o galería de un tuit no se confunde con las pestañas.
      */
     private static List<AccessibilityNodeInfo> xTopTabs(AccessibilityNodeInfo root, Rect screen) {
-        AccessibilityNodeInfo title = null;
-        for (String id : new String[]{X + ":id/home_navigation_bar_title", "home_navigation_bar_title"}) {
-            List<AccessibilityNodeInfo> found = root.findAccessibilityNodeInfosByViewId(id);
-            if (found == null) continue;
-            for (AccessibilityNodeInfo n : found) {
-                if (n != null && n.isVisibleToUser()) { title = n; break; }
-            }
-            if (title != null) break;
-        }
+        // La X nueva no responde a la búsqueda directa por nombre interno, así que
+        // se recorre la pantalla hasta encontrar el título del encabezado.
+        AccessibilityNodeInfo title = findIdSuffix(root, "home_navigation_bar_title", 400);
         if (title == null) return null;
         AccessibilityNodeInfo header = title.getParent();
         if (header == null) return null;
         return findTabRow(header, screen, true);
+    }
+
+    /** Recorre la pantalla buscando un elemento visible cuyo nombre interno termine así. */
+    private static AccessibilityNodeInfo findIdSuffix(AccessibilityNodeInfo root, String suffix, int maxNodes) {
+        ArrayDeque<AccessibilityNodeInfo> queue = new ArrayDeque<>();
+        queue.add(root);
+        int seen = 0;
+        while (!queue.isEmpty() && seen < maxNodes) {
+            AccessibilityNodeInfo n = queue.poll();
+            seen++;
+            if (n == null || !n.isVisibleToUser()) continue;
+            String id = n.getViewIdResourceName();
+            if (id != null && (id.equals(suffix) || id.endsWith("/" + suffix))) return n;
+            for (int i = 0; i < n.getChildCount(); i++) {
+                AccessibilityNodeInfo c = n.getChild(i);
+                if (c != null) queue.add(c);
+            }
+        }
+        return null;
     }
 
     /**
@@ -740,6 +753,12 @@ public class LimitService extends AccessibilityService {
                 AccessibilityNodeInfo following = findExact(root, X_FOLLOWING);
                 if (following != null && clickUp(following)) {
                     setForYou(false);
+                    return;
+                }
+                // Estás dentro de un tuit o un video que abriste desde Para ti: primero
+                // volver al timeline; en el próximo intento (medio segundo) se pasa a Siguiendo.
+                if (findIdSuffix(root, "scaffold_home_tabbed", 120) == null) {
+                    performGlobalAction(GLOBAL_ACTION_BACK);
                     return;
                 }
                 // Pestañas escondidas (bajaste): pasar directo a la página de la derecha
