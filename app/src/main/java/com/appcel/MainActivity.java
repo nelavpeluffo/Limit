@@ -101,7 +101,7 @@ public class MainActivity extends Activity {
                 : "✗ Desactivada: seguí los pasos de abajo para activarla");
         status.setBackgroundColor(getColor(on ? R.color.ok : R.color.warn));
 
-        show(Kind.REELS, "Reels de Instagram", reelsText, reelsBar);
+        show(Kind.REELS, "Reels y lupa de Instagram", reelsText, reelsBar);
         show(Kind.FOR_YOU, "Para ti de X", xText, xBar);
 
         if (Diag.recording()) {

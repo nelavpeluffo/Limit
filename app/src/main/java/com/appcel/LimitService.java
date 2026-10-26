@@ -27,6 +27,7 @@ public class LimitService extends AccessibilityService {
     // Solo se buscan estos botones de pestañas; nada más de la pantalla.
     static final String IG_REELS_TAB_ID = IG + ":id/clips_tab";
     static final String IG_HOME_TAB_ID = IG + ":id/feed_tab";
+    static final String IG_SEARCH_TAB_ID = IG + ":id/search_tab";
     static final String[] IG_REELS_LABEL = {"Reels"};
     static final String[] IG_REELS_PLAYER_IDS = {
             IG + ":id/clips_viewer_view_pager",
@@ -46,7 +47,8 @@ public class LimitService extends AccessibilityService {
 
     private Usage usage;
     private Overlay overlay;
-    private Blocker blocker;
+    private Blocker blocker;        // botón Reels (Instagram) o Para ti (X)
+    private Blocker searchBlocker;  // botón de la lupa (Instagram)
 
     private boolean ticking;
     private long lastTick;
@@ -74,6 +76,7 @@ public class LimitService extends AccessibilityService {
         usage = new Usage(this);
         overlay = new Overlay(this);
         blocker = new Blocker(this);
+        searchBlocker = new Blocker(this);
     }
 
     @Override
@@ -118,6 +121,7 @@ public class LimitService extends AccessibilityService {
         } catch (Exception ignored) {
         }
         blocker.hide();
+        searchBlocker.hide();
         overlay.hide();
     }
 
@@ -213,6 +217,7 @@ public class LimitService extends AccessibilityService {
         prevKind = Kind.NONE;
         if (overlay != null) overlay.hide();
         if (blocker != null) blocker.hide();
+        if (searchBlocker != null) searchBlocker.hide();
     }
 
     private void tick() {
@@ -221,8 +226,11 @@ public class LimitService extends AccessibilityService {
         Kind k = detect();
 
         if (lastPkg != null) updateBlocker(lastRoot, lastPkg);
-        else blocker.hide();
-        if (blocker.isShown()) lastActive = now;
+        else {
+            blocker.hide();
+            searchBlocker.hide();
+        }
+        if (blocker.isShown() || searchBlocker.isShown()) lastActive = now;
 
         if (Diag.recording() && lastPkg != null) {
             lastActive = now;
@@ -304,26 +312,50 @@ public class LimitService extends AccessibilityService {
 
     /** Pone o saca la tapa con candado sobre el botón de Reels o de Para ti. */
     private void updateBlocker(AccessibilityNodeInfo root, String pkg) {
-        AccessibilityNodeInfo tab = null;
-        String msg = null;
-        boolean bottomBar = false;
         if (root != null && IG.equals(pkg) && usage.remaining(Kind.REELS) <= 0) {
-            // Con un Reel o la sección Reels abierta, la barra de abajo no está: sin candado.
+            // Con un Reel o la sección Reels abierta, la barra de abajo no está: sin candados.
             if (reelsTabSelected(root) || reelsPlayerFullScreen(root)) {
                 blocker.hide();
+                searchBlocker.hide();
                 return;
             }
-            tab = reelsTabButton(root);
-            msg = "Reels está bloqueado hasta mañana";
-            bottomBar = true;
-        } else if (root != null && X.equals(pkg) && usage.remaining(Kind.FOR_YOU) <= 0) {
-            tab = clickableUp(findExact(root, X_FOR_YOU));
-            msg = "Para ti está bloqueado hasta mañana";
+            String msg = "Reels y la lupa están bloqueados hasta mañana";
+            place(blocker, reelsTabButton(root), root, true, msg);
+            place(searchBlocker, searchTabButton(root), root, true, msg);
+            return;
         }
+        searchBlocker.hide();
+        if (root != null && X.equals(pkg) && usage.remaining(Kind.FOR_YOU) <= 0) {
+            place(blocker, clickableUp(findExact(root, X_FOR_YOU)), root, false,
+                    "Para ti está bloqueado hasta mañana");
+        } else {
+            blocker.hide();
+        }
+    }
+
+    private static void place(Blocker b, AccessibilityNodeInfo tab, AccessibilityNodeInfo root,
+                              boolean bottomBar, String msg) {
         Rect r = new Rect();
         if (tab != null && tab.isVisibleToUser()) tab.getBoundsInScreen(r);
-        if (looksLikeTabButton(r, root, bottomBar)) blocker.show(r, msg);
-        else blocker.hide();
+        if (looksLikeTabButton(r, root, bottomBar)) b.show(r, msg);
+        else b.hide();
+    }
+
+    /** El botón de la lupa (Explorar) de la barra de abajo de Instagram. */
+    private static AccessibilityNodeInfo searchTabButton(AccessibilityNodeInfo root) {
+        List<AccessibilityNodeInfo> byId = root.findAccessibilityNodeInfosByViewId(IG_SEARCH_TAB_ID);
+        if (byId != null) {
+            for (AccessibilityNodeInfo n : byId) {
+                if (n != null && n.isVisibleToUser()) return n;
+            }
+        }
+        return null;
+    }
+
+    /** ¿Está seleccionada la lupa? */
+    private static boolean searchTabSelected(AccessibilityNodeInfo root) {
+        AccessibilityNodeInfo n = searchTabButton(root);
+        return n != null && (n.isSelected() || isSelectedDown(n, 2));
     }
 
     /**
@@ -365,6 +397,8 @@ public class LimitService extends AccessibilityService {
      * Se busca ese botón por su id o por su nombre "Reels"; no se mira nada más.
      */
     private boolean reelsVisible(AccessibilityNodeInfo root) {
+        // La lupa comparte el mismo límite que Reels: todo el tiempo ahí cuenta.
+        if (searchTabSelected(root)) return true;
         if (!reelsTabSelected(root) && !reelsPlayerFullScreen(root)) return false;
         // Carruseles y fotos que Instagram muestra dentro del reproductor no cuentan.
         return !currentItemIsStill(root);

@@ -22,7 +22,7 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:layout_marginTop="2dp"
-            android:text="15 minutos por día de Reels y de Para ti"
+            android:text="15 minutos por día de Reels y lupa, y de Para ti"
             android:textColor="@color/muted"
             android:textSize="15sp" />
 
@@ -202,7 +202,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
-            android:text="Limit solo mira los botones de las pestañas de Instagram (Reels) y X (Para ti / Siguiendo) para saber cuál está seleccionada, y si en Instagram está abierto el reproductor de Reels a pantalla completa. No lee publicaciones ni mensajes, no guarda nada de lo que ves y no usa internet."
+            android:text="Limit solo mira los botones de las pestañas de Instagram (Reels y lupa) y X (Para ti / Siguiendo) para saber cuál está seleccionada, y si en Instagram está abierto el reproductor de Reels a pantalla completa. No lee publicaciones ni mensajes, no guarda nada de lo que ves y no usa internet."
             android:textColor="@color/muted"
             android:textSize="13sp" />
     </LinearLayout>

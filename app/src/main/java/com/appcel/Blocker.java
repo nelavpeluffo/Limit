@@ -13,8 +13,8 @@ import android.widget.ImageView;
 import android.widget.Toast;
 
 /**
- * Tapa lila con un candado que se pone justo encima del botón de Reels
- * (Instagram) o de la pestaña Para ti (X) cuando ya se usaron los 15 minutos del día. Se "come" los toques, así
+ * Tapa lila con un candado que se pone justo encima del botón de Reels o de la
+ * lupa (Instagram) o de la pestaña Para ti (X) cuando ya se usaron los 15 minutos del día. Se "come" los toques, así
  * que el botón deja de funcionar hasta la medianoche.
  */
 final class Blocker {
