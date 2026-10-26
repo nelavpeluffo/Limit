@@ -20,7 +20,7 @@ import java.util.Locale;
  */
 final class Diag {
     static final long DURATION_MS = 3 * 60 * 1000L;
-    private static final long MAX_BYTES = 500_000;
+    private static final long MAX_BYTES = 1_500_000;
 
     private static final String[] IG_TAB_IDS = {
             LimitService.IG_HOME_TAB_ID,
@@ -85,6 +85,9 @@ final class Diag {
                 }
             }
             label(sb, root, LimitService.IG_REELS_LABEL);
+            sb.append("forma de la pantalla (sin textos ni contenido):\n");
+            int[] count = {0};
+            shape(root, 0, sb, count);
         } else {
             label(sb, root, LimitService.X_FOR_YOU);
             label(sb, root, LimitService.X_FOLLOWING);
@@ -94,6 +97,21 @@ final class Diag {
         try (FileWriter w = new FileWriter(f, true)) {
             w.write(sb.toString());
         } catch (IOException ignored) {
+        }
+    }
+
+    /**
+     * Forma de la pantalla: solo tipo de elemento, nombre interno y tamaño.
+     * Nunca textos, descripciones, fotos ni videos.
+     */
+    private static void shape(AccessibilityNodeInfo n, int depth, StringBuilder sb, int[] count) {
+        if (n == null || count[0] >= 350 || depth > 25) return;
+        if (!n.isVisibleToUser()) return;
+        count[0]++;
+        for (int i = 0; i < depth; i++) sb.append(' ');
+        describe(sb, n);
+        for (int i = 0; i < n.getChildCount(); i++) {
+            shape(n.getChild(i), depth + 1, sb, count);
         }
     }
 
