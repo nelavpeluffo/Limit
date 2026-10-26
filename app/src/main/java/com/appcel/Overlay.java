@@ -21,7 +21,15 @@ final class Overlay {
         this.wm = (WindowManager) service.getSystemService(Context.WINDOW_SERVICE);
     }
 
+    static final int DARK = 0xCC202124;
+    static final int RED = 0xE6C5221F;
+    static final int VIOLET = 0xF29364FF;
+
     void show(String text, boolean alert) {
+        show(text, alert ? RED : DARK);
+    }
+
+    void show(String text, int color) {
         float d = service.getResources().getDisplayMetrics().density;
         if (view == null) {
             view = new TextView(service);
@@ -31,7 +39,7 @@ final class Overlay {
             view.setPadding(ph, pv, ph, pv);
         }
         GradientDrawable bg = new GradientDrawable();
-        bg.setColor(alert ? 0xE6C5221F : 0xCC202124);
+        bg.setColor(color);
         bg.setCornerRadius(100 * d);
         view.setBackground(bg);
         view.setText(text);

@@ -61,6 +61,15 @@ public class LimitService extends AccessibilityService {
 
     private long lastEnforce;
     private long lastQuickCheck;
+    // Aviso "Seguidos" después de pasarte de Para ti con las pestañas escondidas.
+    private long noticeUntil;
+    private final Runnable noticeToViolet = () -> {
+        if (SystemClock.elapsedRealtime() < noticeUntil) overlay.show("Seguidos", Overlay.VIOLET);
+    };
+    private final Runnable noticeEnd = () -> {
+        noticeUntil = 0;
+        overlay.hide();
+    };
     private int enforceStreak;
 
     // Estado de X: la barra de pestañas se esconde al scrollear, así que
@@ -130,6 +139,7 @@ public class LimitService extends AccessibilityService {
         }
         blocker.hide();
         searchBlocker.hide();
+        cancelNotice();
         overlay.hide();
     }
 
@@ -207,6 +217,26 @@ public class LimitService extends AccessibilityService {
         if (now - lastQuickCheck < 150) return;
         lastQuickCheck = now;
         if (detect() == Kind.FOR_YOU) enforce(Kind.FOR_YOU);
+    }
+
+    /**
+     * Te pasamos a Siguiendo sin que se vieran las pestañas: la pastillita roja de
+     * "límite alcanzado" queda 2,5 s y después se vuelve violeta y dice "Seguidos",
+     * como aviso del cambio de pestaña. Después desaparece.
+     */
+    private void startSwitchNotice() {
+        handler.removeCallbacks(noticeToViolet);
+        handler.removeCallbacks(noticeEnd);
+        noticeUntil = SystemClock.elapsedRealtime() + 4500;
+        overlay.show(Kind.FOR_YOU.label + ": límite de hoy alcanzado", true);
+        handler.postDelayed(noticeToViolet, 2500);
+        handler.postDelayed(noticeEnd, 4500);
+    }
+
+    private void cancelNotice() {
+        noticeUntil = 0;
+        handler.removeCallbacks(noticeToViolet);
+        handler.removeCallbacks(noticeEnd);
     }
 
     @Override
@@ -291,7 +321,8 @@ public class LimitService extends AccessibilityService {
                 }
             }
         } else {
-            overlay.hide();
+            if (now >= noticeUntil) overlay.hide();
+            else lastActive = now;
             if (now - lastActive > IDLE_STOP_MS) {
                 ticking = false;
                 prevKind = Kind.NONE;
@@ -715,6 +746,7 @@ public class LimitService extends AccessibilityService {
                 // (Siguiendo), como si deslizaras el dedo hacia la izquierda.
                 if (pageToFollowing(root)) {
                     setForYou(false);
+                    startSwitchNotice();
                     return;
                 }
                 // Si no se pudo: subir un poco el timeline para que X muestre las pestañas
@@ -742,7 +774,10 @@ public class LimitService extends AccessibilityService {
             Rect screen = new Rect();
             root.getBoundsInScreen(screen);
             List<AccessibilityNodeInfo> tabs = xTopTabs(root, screen);
-            if (tabs != null && tabs.size() >= 2 && clickUp(tabs.get(1))) setForYou(false);
+            if (tabs != null && tabs.size() >= 2 && clickUp(tabs.get(1))) {
+                setForYou(false);
+                startSwitchNotice();
+            }
         } catch (Exception ignored) {
         }
     }
