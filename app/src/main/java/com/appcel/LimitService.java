@@ -773,6 +773,7 @@ public class LimitService extends AccessibilityService {
     /** Flecha de atrás (arriba a la izquierda) tocada en el buscador, con el límite cumplido. */
     private void onInstagramClick(AccessibilityEvent e) {
         if (usage.remaining(Kind.REELS) > 0) return;
+        if (onProfileReelsClick(e)) return;
         try {
             AccessibilityNodeInfo src = e.getSource();
             if (src == null) return;
@@ -1006,6 +1007,96 @@ public class LimitService extends AccessibilityService {
             }
             row = row.getParent();
         }
+    }
+
+    /**
+     * Tocaste la pestaña Reels de un perfil (Instagram abre además un menú "Más
+     * recientes / Más vistos"): se cierra ese menú, se vuelve a la grilla del perfil
+     * y aparece el aviso violeta abajo.
+     */
+    private boolean onProfileReelsClick(AccessibilityEvent e) {
+        AccessibilityNodeInfo src;
+        try {
+            src = e.getSource();
+        } catch (Exception ex) {
+            return false;
+        }
+        if (src == null) return false;
+        String id = src.getViewIdResourceName();
+        if (id != null && id.endsWith(":id/clips_tab")) return false;   // botón de la barra de abajo
+        boolean reels = hasReelsLabel(src, 0)
+                || startsWithLabel(e.getContentDescription(), IG_REELS_LABEL[0]);
+        if (!reels && e.getText() != null) {
+            for (CharSequence t : e.getText()) if (startsWithLabel(t, IG_REELS_LABEL[0])) reels = true;
+        }
+        if (!reels || !inTabRow(src)) return false;
+        note("Instagram: tocaste la pestaña Reels de un perfil → grilla del perfil");
+        handler.postDelayed(() -> leaveProfileReels(src, 0), 120);
+        return true;
+    }
+
+    private static boolean hasReelsLabel(AccessibilityNodeInfo n, int depth) {
+        if (n == null || depth > 2) return false;
+        if (startsWithLabel(n.getContentDescription(), IG_REELS_LABEL[0])
+                || startsWithLabel(n.getText(), IG_REELS_LABEL[0])) return true;
+        for (int i = 0; i < n.getChildCount() && i < 6; i++) {
+            if (hasReelsLabel(n.getChild(i), depth + 1)) return true;
+        }
+        return false;
+    }
+
+    private void leaveProfileReels(AccessibilityNodeInfo tab, int attempt) {
+        try {
+            // Primero cerrar el menú que abrió Instagram (una ventanita encima del perfil).
+            if (instagramPopupOnTop() && attempt < 3) {
+                performGlobalAction(GLOBAL_ACTION_BACK);
+                handler.postDelayed(() -> leaveProfileReels(tab, attempt + 1), 180);
+                return;
+            }
+            AccessibilityNodeInfo root = getRootInActiveWindow();
+            AccessibilityNodeInfo pr = root == null ? null : profileReelsTab(root);
+            AccessibilityNodeInfo target = pr != null ? pr : tab;
+            target.refresh();
+            lastProfileSwitch = 0;
+            switchProfileToGrid(target);
+            long now = SystemClock.elapsedRealtime();
+            lastProfileNotice = now;
+            profileReelsNoticed = true;
+            lockNotice.show();
+            // Por las dudas, revisar que haya quedado en la grilla.
+            if (attempt < 6) handler.postDelayed(() -> {
+                try {
+                    AccessibilityNodeInfo r = getRootInActiveWindow();
+                    AccessibilityNodeInfo p2 = r == null ? null : profileReelsTab(r);
+                    if (instagramPopupOnTop() || (p2 != null && tabSelected(p2))) leaveProfileReels(tab, attempt + 3);
+                } catch (Exception ignored) {
+                }
+            }, 400);
+        } catch (Exception ignored) {
+        }
+    }
+
+    /** ¿Hay una ventanita de Instagram (un menú) encima de la pantalla principal? */
+    private boolean instagramPopupOnTop() {
+        List<android.view.accessibility.AccessibilityWindowInfo> ws = getWindows();
+        if (ws == null) return false;
+        Rect screen = new Rect();
+        int maxArea = 0;
+        for (android.view.accessibility.AccessibilityWindowInfo w : ws) {
+            Rect r = new Rect();
+            w.getBoundsInScreen(r);
+            maxArea = Math.max(maxArea, r.width() * r.height());
+        }
+        for (android.view.accessibility.AccessibilityWindowInfo w : ws) {
+            if (w == null || !w.isActive() || w.getType() != android.view.accessibility.AccessibilityWindowInfo.TYPE_APPLICATION) continue;
+            AccessibilityNodeInfo r = w.getRoot();
+            CharSequence p = r == null ? null : r.getPackageName();
+            if (p == null || !IG.contentEquals(p)) return false;
+            Rect b = new Rect();
+            w.getBoundsInScreen(b);
+            return b.width() * b.height() < maxArea * 0.6f;   // más chica que la pantalla: es un menú
+        }
+        return false;
     }
 
     /** ¿Es una pestaña dentro de una fila de al menos 3 pestañas parecidas una al lado de la otra? */
