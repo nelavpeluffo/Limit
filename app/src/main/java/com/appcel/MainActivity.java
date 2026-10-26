@@ -76,11 +76,6 @@ public class MainActivity extends Activity {
         });
         diagSend.setOnClickListener(v -> shareDiag());
 
-        Switch followingSwitch = findViewById(R.id.following_switch);
-        followingSwitch.setChecked(AppSettings.igOpenFollowing(this));
-        followingSwitch.setOnCheckedChangeListener((b, checked) ->
-                AppSettings.setIgOpenFollowing(this, checked));
-
         Switch overlaySwitch = findViewById(R.id.overlay_switch);
         overlaySwitch.setChecked(AppSettings.overlayEnabled(this));
         overlaySwitch.setOnCheckedChangeListener((b, checked) ->

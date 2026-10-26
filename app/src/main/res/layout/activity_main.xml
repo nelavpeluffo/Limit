@@ -100,21 +100,6 @@
             android:text="Mostrar el tiempo que queda arriba de la pantalla"
             android:textSize="15sp" />
 
-        <Switch
-            android:id="@+id/following_switch"
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:layout_marginTop="8dp"
-            android:text="Abrir Instagram directo en «Seguidos»"
-            android:textSize="15sp" />
-
-        <TextView
-            android:layout_width="match_parent"
-            android:layout_height="wrap_content"
-            android:text="Para volver a las recomendaciones, usá la flecha para atrás de arriba en Instagram."
-            android:textColor="@color/muted"
-            android:textSize="13sp" />
-
         <!-- Configuración -->
         <TextView
             android:layout_width="wrap_content"
