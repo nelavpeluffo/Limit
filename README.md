@@ -13,6 +13,7 @@ El resto de Instagram y X (feed, historias, mensajes, la pestaña *Siguiendo*) s
 - Cuando falta 1 minuto, te avisa.
 - Al llegar a 15 minutos te saca: en Instagram te lleva al Inicio y en X te pasa a *Siguiendo*. Si insistís, te manda a la pantalla de inicio del teléfono.
 - Además, los botones de Reels y de la lupa (Instagram) y la pestaña Para ti (X) quedan tapados con un candado lila y no responden hasta la medianoche.
+- Al abrir Instagram en el Inicio, pasa solo a **Seguidos** (se puede apagar en Limit). Para volver a las recomendaciones, flecha para atrás.
 - El contador se reinicia a la medianoche.
 
 ## Instalarla

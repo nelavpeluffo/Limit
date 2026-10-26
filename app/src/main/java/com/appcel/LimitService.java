@@ -52,6 +52,12 @@ public class LimitService extends AccessibilityService {
     // Última sección de Instagram vista con la barra de abajo (lupa, reels u otra).
     private String igSection = "otra";
 
+    // Abrir Instagram directo en "Seguidos"
+    static final String[] IG_FOLLOWING = {"Seguidos", "Following"};
+    private boolean inInstagram;
+    private boolean igFollowingDone;
+    private boolean igLogoTapped;
+
     private boolean ticking;
     private long lastTick;
     private long lastActive;
@@ -98,6 +104,13 @@ public class LimitService extends AccessibilityService {
             return;
         }
         if (X.contentEquals(pkg)) trackXEvent(e);
+        if (IG.contentEquals(pkg) && !inInstagram) {
+            // Acabás de abrir (o volver a) Instagram.
+            inInstagram = true;
+            igFollowingDone = false;
+            igLogoTapped = false;
+            handler.postDelayed(() -> openFollowing(0), 900);
+        }
         if (IG.contentEquals(pkg) && e.getEventType() == AccessibilityEvent.TYPE_VIEW_LONG_CLICKED) {
             onInstagramLongPress(e);
         }
@@ -119,7 +132,9 @@ public class LimitService extends AccessibilityService {
         try {
             AccessibilityNodeInfo root = getRootInActiveWindow();
             CharSequence p = root == null ? null : root.getPackageName();
-            if (p != null && (IG.contentEquals(p) || X.contentEquals(p))) return;
+            if (p != null && IG.contentEquals(p)) return;
+            inInstagram = false;
+            if (p != null && X.contentEquals(p)) return;
         } catch (Exception ignored) {
         }
         blocker.hide();
@@ -185,6 +200,101 @@ public class LimitService extends AccessibilityService {
             if (hasPlayCount(n.getChild(i), depth + 1)) return true;
         }
         return false;
+    }
+
+    /**
+     * Al abrir Instagram en el Inicio, toca el logo y elige "Seguidos" (como harías vos).
+     * Solo una vez por cada vez que abrís la app: si después volvés a las
+     * recomendaciones con la flecha para atrás, no te vuelve a cambiar.
+     */
+    private void openFollowing(int step) {
+        if (igFollowingDone || !inInstagram || !AppSettings.igOpenFollowing(this) || step > 6) return;
+        AccessibilityNodeInfo root;
+        try {
+            root = getRootInActiveWindow();
+        } catch (Exception e) {
+            return;
+        }
+        if (root == null || root.getPackageName() == null || !IG.contentEquals(root.getPackageName())) return;
+
+        if (igLogoTapped) {
+            // Ya tocamos el logo: elegir "Seguidos" en el menú que se abrió.
+            // (Solo en este momento, para nunca tocar otro botón parecido por error.)
+            AccessibilityNodeInfo following = findInTop(root, IG_FOLLOWING, 0.45f);
+            if (following != null && clickUp(following)) note("abrir Instagram: elegí Seguidos");
+            else note("abrir Instagram: no apareció el menú");
+            igFollowingDone = true;
+            return;
+        }
+
+        // ¿Ya estás en Seguidos? (título arriba de todo): no hay nada que hacer.
+        if (findInTop(root, IG_FOLLOWING, 0.12f) != null) {
+            igFollowingDone = true;
+            return;
+        }
+
+        // Solo desde el Inicio (si abrió en mensajes, perfil, etc., no se toca nada).
+        List<AccessibilityNodeInfo> home = root.findAccessibilityNodeInfosByViewId(IG_HOME_TAB_ID);
+        boolean homeSelected = false;
+        if (home != null) for (AccessibilityNodeInfo h : home) {
+            if (h != null && h.isVisibleToUser()) homeSelected |= h.isSelected() || isSelectedDown(h, 2);
+        }
+        if (!homeSelected) {
+            // Puede estar cargando: reintentar un par de veces y después dejarlo.
+            if (step < 3) handler.postDelayed(() -> openFollowing(step + 1), 600);
+            else igFollowingDone = true;
+            return;
+        }
+
+        // Tocar el logo de Instagram de arriba para abrir el menú.
+        AccessibilityNodeInfo logo = findLogo(root);
+        if (logo != null && clickUp(logo)) {
+            igLogoTapped = true;
+            note("abrir Instagram: toqué el logo");
+            handler.postDelayed(() -> openFollowing(step + 1), 700);
+        } else {
+            note("abrir Instagram: no encontré el logo");
+            igFollowingDone = true;
+        }
+    }
+
+    /** El logo "Instagram" de la parte de arriba del Inicio. */
+    private static AccessibilityNodeInfo findLogo(AccessibilityNodeInfo root) {
+        Rect screen = new Rect();
+        root.getBoundsInScreen(screen);
+        List<AccessibilityNodeInfo> found = root.findAccessibilityNodeInfosByText("Instagram");
+        if (found == null) return null;
+        for (AccessibilityNodeInfo n : found) {
+            if (n == null || !n.isVisibleToUser()) continue;
+            CharSequence d = n.getContentDescription() != null ? n.getContentDescription() : n.getText();
+            if (d == null || !d.toString().trim().toLowerCase(Locale.ROOT).startsWith("instagram")) continue;
+            Rect r = new Rect();
+            n.getBoundsInScreen(r);
+            if (r.top < screen.height() * 0.15f) return n;
+        }
+        return null;
+    }
+
+    /** Busca una etiqueta exacta en la parte de arriba de la pantalla. */
+    private static AccessibilityNodeInfo findInTop(AccessibilityNodeInfo root, String[] labels, float maxFraction) {
+        Rect screen = new Rect();
+        root.getBoundsInScreen(screen);
+        for (String label : labels) {
+            List<AccessibilityNodeInfo> found = root.findAccessibilityNodeInfosByText(label);
+            if (found == null) continue;
+            for (AccessibilityNodeInfo n : found) {
+                if (n == null || !n.isVisibleToUser()) continue;
+                if (!startsWithLabel(n.getText(), label) && !startsWithLabel(n.getContentDescription(), label)) continue;
+                Rect r = new Rect();
+                n.getBoundsInScreen(r);
+                if (r.top < screen.height() * maxFraction) return n;
+            }
+        }
+        return null;
+    }
+
+    private void note(String text) {
+        if (Diag.recording()) Diag.note(this, text);
     }
 
     @Override
