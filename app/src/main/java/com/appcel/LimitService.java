@@ -55,6 +55,9 @@ public class LimitService extends AccessibilityService {
     private Blocker backCatcher;   // zona invisible sobre la flecha de atrás del buscador
     private boolean holdingBack;
     private boolean exploreCheckQueued;
+    private long lastBlockerUpdate;
+    private boolean blockerUpdateQueued;
+    private boolean leaving;   // saliendo del buscador hacia el Inicio, con el reloj puesto
     private int homeStable;   // revisiones seguidas con el Inicio ya puesto
     private long searchFlowUntil;
     private long exploreRedirectUntil;
@@ -115,6 +118,7 @@ public class LimitService extends AccessibilityService {
         searchBlocker = new Blocker(this, R.drawable.ic_search, this::openInstagramSearch);
         cover = new Cover(this);
         backCatcher = new Blocker(this, 0, this::onBackArrowTapped);
+        setKeyboardHidden(false);
     }
 
     @Override
@@ -137,6 +141,10 @@ public class LimitService extends AccessibilityService {
             trackXEvent(e);
             quickCheckX();
         }
+        if (IG.contentEquals(pkg) && leaving) {
+            startTicking();   // saliendo hacia el Inicio: no hace falta revisar nada más
+            return;
+        }
         if (IG.contentEquals(pkg)) {
             if (e.getEventType() == AccessibilityEvent.TYPE_VIEW_CLICKED) onInstagramClick(e);
             quickCheckExplore();
@@ -144,7 +152,23 @@ public class LimitService extends AccessibilityService {
         if (IG.contentEquals(pkg) && e.getEventType() == AccessibilityEvent.TYPE_VIEW_LONG_CLICKED) {
             onInstagramLongPress(e);
         }
-        if (pkg != null) {
+        long nowB = SystemClock.elapsedRealtime();
+        if (pkg != null && nowB - lastBlockerUpdate < 80) {
+            // Muchos eventos seguidos: una sola revisión al final, para no trabar nada.
+            if (!blockerUpdateQueued) {
+                blockerUpdateQueued = true;
+                handler.postDelayed(() -> {
+                    blockerUpdateQueued = false;
+                    lastBlockerUpdate = SystemClock.elapsedRealtime();
+                    try {
+                        AccessibilityNodeInfo r = getRootInActiveWindow();
+                        if (r != null && r.getPackageName() != null) updateBlocker(r, r.getPackageName().toString());
+                    } catch (Exception ignored) {
+                    }
+                }, 80);
+            }
+        } else if (pkg != null) {
+            lastBlockerUpdate = nowB;
             // Reaccionar enseguida (sin esperar al próximo segundo) para tapar el botón a tiempo.
             try {
                 AccessibilityNodeInfo root = getRootInActiveWindow();
@@ -170,6 +194,7 @@ public class LimitService extends AccessibilityService {
         backCatcher.hide();
         cover.hide();
         cover.disarm();
+        if (leaving) { leaving = false; setKeyboardHidden(false); }
         xCovered = false;
         cancelNotice();
         overlay.hide();
@@ -532,8 +557,11 @@ public class LimitService extends AccessibilityService {
     private void leaveSearchToHome() {
         searchFlowUntil = 0;
         exploreRedirectUntil = SystemClock.elapsedRealtime() + 6000;   // este camino se encarga
+        leaving = true;
         backCatcher.hide();
         homeStable = 0;
+        // El teclado tapa la barra de abajo (y el botón Inicio): se esconde mientras está el reloj.
+        setKeyboardHidden(true);
         cover.show(() -> leaveStep(0), 140);   // aparece con un fundido corto
     }
 
@@ -544,8 +572,26 @@ public class LimitService extends AccessibilityService {
     private void revealHome() {
         handler.postDelayed(() -> {
             cover.fadeOut(320);
-            handler.postDelayed(() -> exploreRedirectUntil = 0, 400);
+            handler.postDelayed(() -> {
+                exploreRedirectUntil = 0;
+                leaving = false;
+                setKeyboardHidden(false);
+            }, 400);
         }, 350);
+    }
+
+    private void setKeyboardHidden(boolean hidden) {
+        try {
+            getSoftKeyboardController().setShowMode(hidden ? SHOW_MODE_HIDDEN : SHOW_MODE_AUTO);
+        } catch (Exception ignored) {
+        }
+    }
+
+    private static boolean homeTabVisible(AccessibilityNodeInfo root) {
+        List<AccessibilityNodeInfo> home = root.findAccessibilityNodeInfosByViewId(IG_HOME_TAB_ID);
+        if (home == null) return false;
+        for (AccessibilityNodeInfo h : home) if (h != null && h.isVisibleToUser()) return true;
+        return false;
     }
 
     private void leaveStep(int attempt) {
@@ -559,13 +605,14 @@ public class LimitService extends AccessibilityService {
                 if (++homeStable >= 2) { revealHome(); return; }
             } else {
                 homeStable = 0;
+                // Apenas se ve la barra de abajo (el teclado ya se fue), tocar Inicio.
+                if (homeTabVisible(root) && attempt % 2 == 0) clickHome(root);
+                // Si la barra sigue sin aparecer, salir del buscador con "atrás" (con el reloj puesto).
+                else if (search && (attempt == 5 || attempt == 9)) performGlobalAction(GLOBAL_ACTION_BACK);
             }
-            if (attempt == 0 || grid && attempt % 3 == 0) clickHome(root);
-            // Si tocar Inicio no alcanzó (teclado abierto, por ejemplo), ir atrás con el reloj puesto.
-            if (search && (attempt == 3 || attempt == 7)) performGlobalAction(GLOBAL_ACTION_BACK);
         } catch (Exception ignored) {
         }
-        if (attempt < 30) handler.postDelayed(() -> leaveStep(attempt + 1), 120);
+        if (attempt < 35) handler.postDelayed(() -> leaveStep(attempt + 1), 100);
         else finishLeave(0);   // nunca queda tapado más de ~4 s
     }
 
@@ -573,6 +620,8 @@ public class LimitService extends AccessibilityService {
         handler.postDelayed(() -> {
             cover.hide();
             exploreRedirectUntil = 0;
+            leaving = false;
+            setKeyboardHidden(false);
         }, delay);
     }
 
@@ -1156,8 +1205,7 @@ public class LimitService extends AccessibilityService {
             if (!xCovered) {
                 xCovered = true;
                 xCoveredSince = now;
-                cover.show();
-                overlay.raise();
+                cover.show(overlay::raise);   // la pastilla, por encima del reloj
             }
             if (root != null) {
                 Rect screen = new Rect();

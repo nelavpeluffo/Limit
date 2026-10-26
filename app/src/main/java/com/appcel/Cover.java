@@ -26,10 +26,32 @@ final class Cover {
     private ValueAnimator anim;
     private boolean shown;
 
+    /**
+     * El reloj se dibuja y anima en su propio hilo: así gira parejo aunque Limit esté
+     * ocupado revisando la pantalla de Instagram mientras cambia.
+     */
+    private final android.os.Handler ui;
+    private final android.os.Handler main = new android.os.Handler(android.os.Looper.getMainLooper());
+
     Cover(AccessibilityService service) {
         this.service = service;
         this.wm = (WindowManager) service.getSystemService(Context.WINDOW_SERVICE);
+        android.os.HandlerThread t = new android.os.HandlerThread("limit-reloj", android.os.Process.THREAD_PRIORITY_DISPLAY);
+        t.start();
+        ui = new android.os.Handler(t.getLooper());
     }
+
+    void arm() { ui.post(this::armImpl); }
+    void disarm() { ui.post(this::disarmImpl); }
+    void show() { show(null, 0); }
+    void show(Runnable onShown) { show(onShown, 0); }
+    /** onShown corre en el hilo principal, cuando el reloj ya tapa la pantalla. */
+    void show(Runnable onShown, long fadeInMs) {
+        Runnable onMain = onShown == null ? null : () -> main.post(onShown);
+        ui.post(() -> showImpl(onMain, fadeInMs));
+    }
+    void fadeOut(long ms) { ui.post(() -> fadeOutImpl(ms)); }
+    void hide() { ui.post(this::hideImpl); }
 
     private boolean attached;   // ventana puesta (visible o transparente)
     private boolean armed;      // dejarla puesta y transparente, lista para aparecer al instante
@@ -38,30 +60,22 @@ final class Cover {
      * Deja la ventana del reloj puesta pero transparente, para que al hacer falta
      * aparezca en el mismo cuadro (agregar una ventana nueva tarda más).
      */
-    void arm() {
+    private void armImpl() {
         armed = true;
         attach();
     }
 
     /** Ya no hace falta tenerla lista: se saca si no está a la vista. */
-    void disarm() {
+    private void disarmImpl() {
         armed = false;
         if (!shown) detach();
-    }
-
-    void show() {
-        show(null);
-    }
-
-    void show(Runnable onShown) {
-        show(onShown, 0);
     }
 
     /**
      * Muestra el reloj (con un fundido de fadeInMs, o de golpe si es 0); onShown corre
      * cuando ya tapa la pantalla por completo.
      */
-    void show(Runnable onShown, long fadeInMs) {
+    private void showImpl(Runnable onShown, long fadeInMs) {
         if (shown && view.getAlpha() < 1f) {
             // Se estaba yendo con el fundido: vuelve a aparecer entero.
             view.animate().cancel();
@@ -108,21 +122,17 @@ final class Cover {
         anim.start();
     }
 
-    boolean isShown() {
-        return shown;
-    }
-
     /** Se va con un fundido suave, dejando ver lo que quedó abajo (el Inicio). */
-    void fadeOut(long ms) {
+    private void fadeOutImpl(long ms) {
         if (!shown) return;
         view.animate().cancel();
         view.animate().alpha(0f).setDuration(ms)
                 .setInterpolator(new android.view.animation.AccelerateDecelerateInterpolator())
-                .withEndAction(() -> { if (shown && view.getAlpha() == 0f) hide(); })
+                .withEndAction(() -> { if (shown && view.getAlpha() == 0f) hideImpl(); })
                 .start();
     }
 
-    void hide() {
+    private void hideImpl() {
         if (view != null) view.animate().cancel();
         if (anim != null) {
             anim.cancel();
