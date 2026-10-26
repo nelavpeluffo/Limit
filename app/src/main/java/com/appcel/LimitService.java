@@ -53,6 +53,7 @@ public class LimitService extends AccessibilityService {
     private Blocker searchBlocker;  // botón de la lupa (Instagram): abre el buscador
     private Cover cover;
     private Blocker backCatcher;   // zona invisible sobre la flecha de atrás del buscador
+    private Blocker profileReelsCatcher;   // zona invisible sobre la pestaña Reels de un perfil (y su flechita)
     private boolean holdingBack;
     private boolean exploreCheckQueued;
     private long lastBlockerUpdate;
@@ -128,6 +129,7 @@ public class LimitService extends AccessibilityService {
         cover = new Cover(this);
         lockNotice = new LockNotice(this);
         backCatcher = new Blocker(this, 0, this::onBackArrowTapped);
+        profileReelsCatcher = new Blocker(this, 0, this::onProfileReelsCatcherTap);
         setKeyboardHidden(false);
     }
 
@@ -209,6 +211,7 @@ public class LimitService extends AccessibilityService {
         blocker.hide();
         searchBlocker.hide();
         backCatcher.hide();
+        profileReelsCatcher.hide();
         cover.hide();
         cover.disarm();
         lockNotice.hide();
@@ -486,6 +489,7 @@ public class LimitService extends AccessibilityService {
                 blocker.hide();
                 searchBlocker.hide();
                 backCatcher.hide();
+                profileReelsCatcher.hide();
                 return;
             }
             // Perfiles: la pestaña Reels te devuelve a la grilla del perfil (con aviso).
@@ -502,6 +506,7 @@ public class LimitService extends AccessibilityService {
             return;
         }
         backCatcher.hide();
+        profileReelsCatcher.hide();
         searchBlocker.hide();
         if (root != null && pkg != null) cover.disarm();
         // En X no se pone candado: al cumplir el límite se pasa a Siguiendo.
@@ -651,6 +656,7 @@ public class LimitService extends AccessibilityService {
         exploreRedirectUntil = SystemClock.elapsedRealtime() + 6000;   // este camino se encarga
         leaving = true;
         backCatcher.hide();
+        profileReelsCatcher.hide();
         homeStable = 0;
         // El teclado tapa la barra de abajo (y el botón Inicio): se esconde mientras está el reloj.
         setKeyboardHidden(true);
@@ -1032,6 +1038,7 @@ public class LimitService extends AccessibilityService {
             AccessibilityNodeInfo main = instagramMainRoot();
             List<AccessibilityNodeInfo> tabs = main == null ? null : profileTabs(main);
             if (tabs == null) {
+                profileReelsCatcher.hide();
                 if (profileReelsNoticed) {
                     // Recién cuando saliste del perfil (unos segundos sin verlo) puede volver a avisar.
                     if (profileGoneSince == 0) profileGoneSince = now;
@@ -1042,7 +1049,14 @@ public class LimitService extends AccessibilityService {
             lastProfileSeen = now;
             profileGoneSince = 0;
             int reels = reelsTabIndex(tabs);
-            if (reels <= 0) return true;   // perfil sin pestaña Reels
+            if (reels <= 0) {   // perfil sin pestaña Reels
+                profileReelsCatcher.hide();
+                return true;
+            }
+            // Encima de la pestaña Reels (y su flechita), una zona invisible: al tocarla se
+            // va directo a la grilla, sin que Instagram llegue a abrir Reels ni su menú.
+            if (main.equals(getRootInActiveWindow())) place(profileReelsCatcher, tabs.get(reels), main, false, "");
+            else profileReelsCatcher.hide();
 
             // Al entrar al perfil: una vez por perfil, y nunca más seguido que cada 20 s.
             if (!profileReelsNoticed && now - lastProfileNotice > 20_000) {
@@ -1075,6 +1089,26 @@ public class LimitService extends AccessibilityService {
             return true;
         } catch (Exception ignored) {
             return false;
+        }
+    }
+
+    /** Tocaste la pestaña Reels de un perfil (o su flechita): directo a la grilla, con aviso. */
+    private void onProfileReelsCatcherTap() {
+        long now = SystemClock.elapsedRealtime();
+        try {
+            AccessibilityNodeInfo main = instagramMainRoot();
+            List<AccessibilityNodeInfo> tabs = main == null ? null : profileTabs(main);
+            if (tabs != null && !selectedDeep(tabs.get(0))) {
+                if (!clickDown(tabs.get(0))) clickUp(tabs.get(0));
+            }
+        } catch (Exception ignored) {
+        }
+        note("Instagram: tocaste la pestaña Reels de un perfil → grilla del perfil");
+        lastReelsTabAction = now;
+        if (now - lastProfileNotice > 4000) {
+            lastProfileNotice = now;
+            profileReelsNoticed = true;
+            lockNotice.show();
         }
     }
 
