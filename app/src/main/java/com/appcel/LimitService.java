@@ -693,15 +693,20 @@ public class LimitService extends AccessibilityService {
                     setForYou(false);
                     return;
                 }
-                // Las pestañas están escondidas porque bajaste: subir un poco el timeline
-                // hace que X las vuelva a mostrar; en el próximo intento se toca Siguiendo.
+                // Pestañas escondidas (bajaste): pasar directo a la página de la derecha
+                // (Siguiendo), como si deslizaras el dedo hacia la izquierda.
+                if (pageToFollowing(root)) {
+                    setForYou(false);
+                    return;
+                }
+                // Si no se pudo: subir un poco el timeline para que X muestre las pestañas
+                // y enseguida tocar Siguiendo.
                 AccessibilityNodeInfo list = findTimeline(root, screen);
-                if (list != null && list.performAction(AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD)) return;
-                // Si no, tocar "Inicio" (primer botón de abajo) también las vuelve a mostrar.
-                List<AccessibilityNodeInfo> bottom = findTabRow(root, screen, false);
-                if (bottom != null) clickUp(bottom.get(0));
+                if (list != null && list.performAction(AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD)) {
+                    handler.postDelayed(this::clickXFollowing, 450);
+                }
             }
-            // Nunca se cierra X: se vuelve a intentar en un segundo y medio.
+            // Nunca se cierra X: si hiciera falta, se vuelve a intentar en un segundo y medio.
         } else {
             if (root != null) {
                 List<AccessibilityNodeInfo> homeTab = root.findAccessibilityNodeInfosByViewId(IG_HOME_TAB_ID);
@@ -709,6 +714,54 @@ public class LimitService extends AccessibilityService {
             }
             performGlobalAction(GLOBAL_ACTION_BACK);
         }
+    }
+
+    /** Toca la pestaña Siguiendo (la segunda de arriba) si está visible. */
+    private void clickXFollowing() {
+        try {
+            AccessibilityNodeInfo root = getRootInActiveWindow();
+            if (root == null || root.getPackageName() == null || !X.contentEquals(root.getPackageName())) return;
+            Rect screen = new Rect();
+            root.getBoundsInScreen(screen);
+            List<AccessibilityNodeInfo> tabs = xTopTabs(root, screen);
+            if (tabs != null && tabs.size() >= 2 && clickUp(tabs.get(1))) setForYou(false);
+        } catch (Exception ignored) {
+        }
+    }
+
+    /**
+     * Las pestañas de X son páginas una al lado de la otra. Se busca el contenedor
+     * que permite pasar de página hacia la derecha y se le pide pasar a la siguiente
+     * (Para ti → Siguiendo).
+     */
+    private static boolean pageToFollowing(AccessibilityNodeInfo root) {
+        ArrayDeque<AccessibilityNodeInfo> queue = new ArrayDeque<>();
+        queue.add(root);
+        int seen = 0;
+        while (!queue.isEmpty() && seen < 300) {
+            AccessibilityNodeInfo n = queue.poll();
+            seen++;
+            if (n == null || !n.isVisibleToUser()) continue;
+            Rect r = new Rect();
+            n.getBoundsInScreen(r);
+            Rect screen = new Rect();
+            root.getBoundsInScreen(screen);
+            // Solo el contenedor grande de las páginas (no una galería dentro de un tuit).
+            boolean big = r.width() >= screen.width() * 0.9f && r.height() >= screen.height() * 0.5f;
+            if (n.isScrollable() && big) {
+                for (AccessibilityNodeInfo.AccessibilityAction a : n.getActionList()) {
+                    int id = a.getId();
+                    boolean right = id == android.R.id.accessibilityActionScrollRight
+                            || (android.os.Build.VERSION.SDK_INT >= 29 && id == android.R.id.accessibilityActionPageRight);
+                    if (right && n.performAction(id)) return true;
+                }
+            }
+            for (int i = 0; i < n.getChildCount(); i++) {
+                AccessibilityNodeInfo c = n.getChild(i);
+                if (c != null) queue.add(c);
+            }
+        }
+        return false;
     }
 
     /** La lista grande que se puede desplazar (el timeline de X). */
