@@ -700,6 +700,7 @@ public class LimitService extends AccessibilityService {
             leaveSearchToHome();
             return true;
         }
+        if (event.getAction() == android.view.KeyEvent.ACTION_DOWN) note("botón atrás del teléfono: Limit lo recibió");
         if (event.getAction() == android.view.KeyEvent.ACTION_DOWN
                 && usage != null && usage.remaining(Kind.REELS) <= 0) {
             try {
