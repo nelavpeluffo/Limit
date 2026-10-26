@@ -3,7 +3,6 @@ package com.appcel;
 import android.accessibilityservice.AccessibilityService;
 import android.animation.ValueAnimator;
 import android.content.Context;
-import android.content.res.Configuration;
 import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.PixelFormat;
@@ -16,9 +15,8 @@ import android.widget.FrameLayout;
 
 /**
  * Pantalla de transición al ir al buscador de Instagram: tapa la grilla de la lupa
- * un instante y muestra en el centro el reloj de Limit en violeta, con las agujas
- * girando como animación de carga. El fondo sigue el modo del teléfono (oscuro o
- * claro). No recibe toques.
+ * un instante con el fondo violeta del ícono de Limit y, en el centro, su reloj
+ * blanco con las agujas girando como animación de carga. No recibe toques.
  */
 final class Cover {
     private final AccessibilityService service;
@@ -42,9 +40,8 @@ final class Cover {
             int size = (int) (72 * d);
             view.addView(spinner, new FrameLayout.LayoutParams(size, size, Gravity.CENTER));
         }
-        boolean dark = (service.getResources().getConfiguration().uiMode
-                & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
-        view.setBackgroundColor(dark ? 0xFF000000 : 0xFFFFFFFF);
+        // Fondo violeta, como el fondo del reloj en el ícono de Limit.
+        view.setBackgroundColor(0xFF9364FF);
 
         WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
                 WindowManager.LayoutParams.MATCH_PARENT,
@@ -87,7 +84,7 @@ final class Cover {
         shown = false;
     }
 
-    /** El reloj del ícono de Limit: aro violeta y dos agujas que giran. */
+    /** El reloj del ícono de Limit: aro blanco y dos agujas que giran. */
     private static final class ClockSpinner extends View {
         private final Paint ring = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint arc = new Paint(Paint.ANTI_ALIAS_FLAG);
@@ -99,15 +96,15 @@ final class Cover {
             super(c);
             ring.setStyle(Paint.Style.STROKE);
             ring.setStrokeWidth(5 * d);
-            ring.setColor(0x559364FF);
+            ring.setColor(0x55FFFFFF);
             arc.setStyle(Paint.Style.STROKE);
             arc.setStrokeWidth(5 * d);
             arc.setStrokeCap(Paint.Cap.ROUND);
-            arc.setColor(0xFF9364FF);
+            arc.setColor(0xFFFFFFFF);
             hand.setStyle(Paint.Style.STROKE);
             hand.setStrokeWidth(5 * d);
             hand.setStrokeCap(Paint.Cap.ROUND);
-            hand.setColor(0xFF9364FF);
+            hand.setColor(0xFFFFFFFF);
         }
 
         void setPhase(float p) {
