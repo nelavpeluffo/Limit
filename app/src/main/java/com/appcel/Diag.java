@@ -163,6 +163,7 @@ final class Diag {
         if (n.isSelected()) sb.append(" [SELECCIONADO]");
         if (n.isChecked()) sb.append(" [CHK]");
         if (n.isClickable()) sb.append(" [clic]");
+        if (n.isScrollable()) sb.append(" [scroll]");
         if (!n.isVisibleToUser()) sb.append(" [oculto]");
         Rect r = new Rect();
         n.getBoundsInScreen(r);

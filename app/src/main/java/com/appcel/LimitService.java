@@ -64,6 +64,9 @@ public class LimitService extends AccessibilityService {
     private long lastEnforce;
     private long lastQuickCheck;
     private long swipePendingUntil;
+    // Timeline de cada pestaña de X (para reconocerlos con las pestañas escondidas).
+    private AccessibilityNodeInfo xForYouList;
+    private AccessibilityNodeInfo xFollowingList;
     private int swipeAttempt;
     // Aviso "Seguidos" después de pasarte de Para ti con las pestañas escondidas.
     private long noticeUntil;
@@ -636,11 +639,45 @@ public class LimitService extends AccessibilityService {
         // Fila de pestañas de arriba del Inicio: la primera (izquierda) es "Para ti".
         // Se reconoce por su forma y por cuál está seleccionada, sin leer textos.
         List<AccessibilityNodeInfo> tabs = xTopTabs(root, screen);
+        boolean inTimeline = findIdSuffix(root, "scaffold_home_tabbed", 120) != null;
         if (tabs != null) {
             int sel = selectedIndex(tabs);
             if (sel == 0) setForYou(true);
             else if (sel > 0) setForYou(false);
+            // Recordar qué timeline es cada pestaña, para reconocerlos después
+            // cuando las pestañas se escondan.
+            if (sel >= 0 && inTimeline) {
+                AccessibilityNodeInfo list = findVerticalList(root, screen);
+                if (list != null) {
+                    // Si los dos resultaran ser el mismo elemento no sirven para distinguir.
+                    if (sel == 0) {
+                        xForYouList = list;
+                        if (list.equals(xFollowingList)) xFollowingList = null;
+                    } else {
+                        xFollowingList = list;
+                        if (list.equals(xForYouList)) xForYouList = null;
+                    }
+                }
+            }
             return xForYou;
+        }
+
+        // Pestañas escondidas (bajaste): reconocer en cuál de los dos timelines estás,
+        // aunque hayas pasado de uno a otro deslizando el dedo.
+        if (inTimeline) {
+            AccessibilityNodeInfo list = findVerticalList(root, screen);
+            if (list != null) {
+                if (xForYouList != null && list.equals(xForYouList)) {
+                    if (!xForYou) note("X: reconocí el timeline de Para ti");
+                    setForYou(true);
+                    return true;
+                }
+                if (xFollowingList != null && list.equals(xFollowingList)) {
+                    if (xForYou) note("X: reconocí el timeline de Siguiendo");
+                    setForYou(false);
+                    return false;
+                }
+            }
         }
 
         // Versiones anteriores de X: por el nombre de las pestañas.
@@ -908,6 +945,8 @@ public class LimitService extends AccessibilityService {
             AccessibilityNodeInfo after = findVerticalList(root, screen);
             if (before != null && after != null && !after.equals(before)) {
                 // El timeline que se ve es otro: ya estás en Siguiendo.
+                xForYouList = before;
+                xFollowingList = after;
                 setForYou(false);
                 swipeAttempt = 0;
                 note("X: confirmado, pasó a Siguiendo");
