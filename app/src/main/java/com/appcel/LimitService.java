@@ -57,6 +57,7 @@ public class LimitService extends AccessibilityService {
     private boolean exploreCheckQueued;
     private long lastBlockerUpdate;
     private boolean blockerUpdateQueued;
+    private boolean keyboardSeenInSearch;   // en este buscador ya estuvo el teclado abierto
     private boolean leaving;   // saliendo del buscador hacia el Inicio, con el reloj puesto
     private int homeStable;   // revisiones seguidas con el Inicio ya puesto
     private long searchFlowUntil;
@@ -125,6 +126,11 @@ public class LimitService extends AccessibilityService {
     public void onAccessibilityEvent(AccessibilityEvent e) {
         if (usage == null || e == null) return;
         CharSequence pkg = e.getPackageName();
+        if (e.getEventType() == AccessibilityEvent.TYPE_WINDOWS_CHANGED) {
+            // Se abrió o se cerró una ventana (por ejemplo, el teclado).
+            checkKeyboardClosed();
+            return;
+        }
         boolean target = pkg != null && (IG.contentEquals(pkg) || X.contentEquals(pkg));
         if (!target) {
             // Otra app pasó al frente (inicio del teléfono, otra app...): solo se mira
@@ -148,6 +154,7 @@ public class LimitService extends AccessibilityService {
         if (IG.contentEquals(pkg)) {
             if (e.getEventType() == AccessibilityEvent.TYPE_VIEW_CLICKED) onInstagramClick(e);
             quickCheckExplore();
+            checkKeyboardClosed();
         }
         if (IG.contentEquals(pkg) && e.getEventType() == AccessibilityEvent.TYPE_VIEW_LONG_CLICKED) {
             onInstagramLongPress(e);
@@ -554,6 +561,56 @@ public class LimitService extends AccessibilityService {
      * Salir del buscador con el límite cumplido: primero el reloj y, con el reloj
      * ya en pantalla, directo al Inicio (sin pasar por la grilla de la lupa).
      */
+    /**
+     * Con el límite cumplido, en el buscador vacío: si se baja el teclado (el primer
+     * deslizamiento de "atrás"), se toma como que querés salir y te lleva al Inicio
+     * con el reloj, sin pasar por la grilla. Si escribiste algo, no hace nada, así
+     * podés mirar los resultados.
+     */
+    private void checkKeyboardClosed() {
+        if (usage == null || leaving || usage.remaining(Kind.REELS) > 0) {
+            keyboardSeenInSearch = false;
+            return;
+        }
+        try {
+            AccessibilityNodeInfo root = getRootInActiveWindow();
+            CharSequence p = root == null ? null : root.getPackageName();
+            if (p == null || !IG.contentEquals(p) || !inSearchScreen(root)) {
+                keyboardSeenInSearch = false;
+                return;
+            }
+            if (keyboardVisible()) {
+                keyboardSeenInSearch = true;
+                return;
+            }
+            if (keyboardSeenInSearch && SystemClock.elapsedRealtime() >= searchFlowUntil && searchFieldEmpty(root)) {
+                keyboardSeenInSearch = false;
+                note("Instagram: se bajó el teclado en el buscador vacío → reloj e Inicio");
+                leaveSearchToHome();
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    private boolean keyboardVisible() {
+        List<android.view.accessibility.AccessibilityWindowInfo> ws = getWindows();
+        if (ws == null) return false;
+        for (android.view.accessibility.AccessibilityWindowInfo w : ws) {
+            if (w != null && w.getType() == android.view.accessibility.AccessibilityWindowInfo.TYPE_INPUT_METHOD) return true;
+        }
+        return false;
+    }
+
+    /** ¿El campo de búsqueda está vacío? (solo mira si muestra la pista, no lee lo escrito) */
+    private static boolean searchFieldEmpty(AccessibilityNodeInfo root) {
+        List<AccessibilityNodeInfo> found = root.findAccessibilityNodeInfosByViewId(IG + ":id/action_bar_search_edit_text");
+        if (found == null) return false;
+        for (AccessibilityNodeInfo n : found) {
+            if (n != null && n.isVisibleToUser()) return n.isShowingHintText();
+        }
+        return false;
+    }
+
     private void leaveSearchToHome() {
         searchFlowUntil = 0;
         exploreRedirectUntil = SystemClock.elapsedRealtime() + 6000;   // este camino se encarga
