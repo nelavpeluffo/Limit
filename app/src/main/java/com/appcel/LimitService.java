@@ -1271,12 +1271,6 @@ public class LimitService extends AccessibilityService {
         if (k == Kind.FOR_YOU) {
             // Pastillita roja al instante; a los 2,5 s pasa a la violeta "Siguiendo".
             if (now >= noticeUntil) startSwitchNotice();
-            // Que no se vea Para ti: pantalla violeta con el reloj mientras te pasa a Siguiendo.
-            if (!xCovered) {
-                xCovered = true;
-                xCoveredSince = now;
-                cover.show(overlay::raise);   // la pastilla, por encima del reloj
-            }
             if (root != null) {
                 Rect screen = new Rect();
                 root.getBoundsInScreen(screen);
@@ -1425,12 +1419,10 @@ public class LimitService extends AccessibilityService {
         boolean left = false, right = false;
         for (AccessibilityNodeInfo.AccessibilityAction a : n.getActionList()) {
             int id = a.getId();
+            // Solo "desplazar": X ofrece "página izquierda/derecha" siempre, en cualquier
+            // página, así que eso no sirve para saber en cuál estás.
             if (id == android.R.id.accessibilityActionScrollLeft) left = true;
             if (id == android.R.id.accessibilityActionScrollRight) right = true;
-            if (android.os.Build.VERSION.SDK_INT >= 29) {
-                if (id == android.R.id.accessibilityActionPageLeft) left = true;
-                if (id == android.R.id.accessibilityActionPageRight) right = true;
-            }
         }
         return new boolean[]{left, right};
     }
