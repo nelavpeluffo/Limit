@@ -7,5 +7,5 @@
     android:canRequestFilterKeyEvents="true"
     android:canRetrieveWindowContent="true"
     android:description="@string/service_description"
-    android:notificationTimeout="150"
+    android:notificationTimeout="60"
     android:settingsActivity="com.appcel.MainActivity" />

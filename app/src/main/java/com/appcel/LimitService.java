@@ -52,6 +52,8 @@ public class LimitService extends AccessibilityService {
     private Blocker blocker;        // botón Reels (Instagram) o Para ti (X)
     private Blocker searchBlocker;  // botón de la lupa (Instagram): abre el buscador
     private Cover cover;
+    private Blocker backCatcher;   // zona invisible sobre la flecha de atrás del buscador
+    private boolean holdingBack;
     private long searchFlowUntil;
     private long exploreRedirectUntil;
     private boolean xCovered;
@@ -110,6 +112,7 @@ public class LimitService extends AccessibilityService {
         blocker = new Blocker(this);
         searchBlocker = new Blocker(this, R.drawable.ic_search, this::openInstagramSearch);
         cover = new Cover(this);
+        backCatcher = new Blocker(this, 0, this::onBackArrowTapped);
     }
 
     @Override
@@ -162,6 +165,7 @@ public class LimitService extends AccessibilityService {
         }
         blocker.hide();
         searchBlocker.hide();
+        backCatcher.hide();
         cover.hide();
         xCovered = false;
         cancelNotice();
@@ -416,13 +420,17 @@ public class LimitService extends AccessibilityService {
             if (reelsTabSelected(root) || reelsPlayerFullScreen(root)) {
                 blocker.hide();
                 searchBlocker.hide();
+                backCatcher.hide();
                 return;
             }
             String msg = "Reels está bloqueado hasta mañana";
             place(blocker, reelsTabButton(root), root, true, msg);
             place(searchBlocker, searchTabButton(root), root, true, msg);
+            if (inSearchScreen(root)) place(backCatcher, searchBackArrow(root), root, false, "");
+            else backCatcher.hide();
             return;
         }
+        backCatcher.hide();
         searchBlocker.hide();
         // En X no se pone candado: al cumplir el límite se pasa a Siguiendo.
         blocker.hide();
@@ -456,7 +464,7 @@ public class LimitService extends AccessibilityService {
     private void quickCheckExplore() {
         if (usage.remaining(Kind.REELS) > 0) return;
         long now = SystemClock.elapsedRealtime();
-        if (now < searchFlowUntil || now < exploreRedirectUntil || now - lastExploreCheck < 120) return;
+        if (now < searchFlowUntil || now < exploreRedirectUntil || now - lastExploreCheck < 50) return;
         lastExploreCheck = now;
         try {
             AccessibilityNodeInfo root = getRootInActiveWindow();
@@ -559,17 +567,84 @@ public class LimitService extends AccessibilityService {
     /** Botón "atrás" del teléfono (o el gesto de atrás). */
     @Override
     protected boolean onKeyEvent(android.view.KeyEvent event) {
-        if (event.getKeyCode() == android.view.KeyEvent.KEYCODE_BACK
-                && event.getAction() == android.view.KeyEvent.ACTION_DOWN
+        if (event.getKeyCode() != android.view.KeyEvent.KEYCODE_BACK) return false;
+        if (event.getAction() == android.view.KeyEvent.ACTION_UP && holdingBack) {
+            // Se retuvo el "atrás": se ejecuta recién cuando el reloj ya tapa la pantalla.
+            holdingBack = false;
+            handler.postDelayed(() -> {
+                performGlobalAction(GLOBAL_ACTION_BACK);
+                handler.postDelayed(() -> afterBackFromSearch(0), 120);
+            }, 80);
+            return true;
+        }
+        if (event.getAction() == android.view.KeyEvent.ACTION_DOWN
                 && usage != null && usage.remaining(Kind.REELS) <= 0) {
             try {
                 AccessibilityNodeInfo root = getRootInActiveWindow();
                 CharSequence pkg = root == null ? null : root.getPackageName();
-                if (pkg != null && IG.contentEquals(pkg) && inSearchScreen(root)) coverBackFromSearch();
+                if (pkg != null && IG.contentEquals(pkg) && inSearchScreen(root)) {
+                    note("Instagram: atrás en el buscador → reloj primero");
+                    searchFlowUntil = 0;
+                    cover.show();
+                    holdingBack = true;
+                    return true;
+                }
             } catch (Exception ignored) {
             }
         }
         return false;   // la tecla sigue su camino normal
+    }
+
+    /** Flecha de atrás de Instagram (zona invisible encima): reloj primero, después atrás. */
+    private void onBackArrowTapped() {
+        note("Instagram: flecha atrás en el buscador → reloj primero");
+        searchFlowUntil = 0;
+        cover.show();
+        backCatcher.hide();
+        handler.postDelayed(() -> {
+            boolean clicked = false;
+            try {
+                AccessibilityNodeInfo root = getRootInActiveWindow();
+                AccessibilityNodeInfo arrow = root == null ? null : searchBackArrow(root);
+                clicked = arrow != null && clickUp(arrow);
+            } catch (Exception ignored) {
+            }
+            if (!clicked) performGlobalAction(GLOBAL_ACTION_BACK);
+            handler.postDelayed(() -> afterBackFromSearch(0), 120);
+        }, 80);
+    }
+
+    /** La flecha de atrás arriba a la izquierda del buscador de Instagram. */
+    private static AccessibilityNodeInfo searchBackArrow(AccessibilityNodeInfo root) {
+        Rect screen = new Rect();
+        root.getBoundsInScreen(screen);
+        List<AccessibilityNodeInfo> field = root.findAccessibilityNodeInfosByViewId(IG + ":id/action_bar_search_edit_text");
+        Rect fieldRect = new Rect();
+        if (field != null) for (AccessibilityNodeInfo f : field) {
+            if (f != null && f.isVisibleToUser()) { f.getBoundsInScreen(fieldRect); break; }
+        }
+        if (fieldRect.isEmpty()) return null;
+        ArrayDeque<AccessibilityNodeInfo> queue = new ArrayDeque<>();
+        queue.add(root);
+        int seen = 0;
+        while (!queue.isEmpty() && seen < 250) {
+            AccessibilityNodeInfo n = queue.poll();
+            seen++;
+            if (n == null || !n.isVisibleToUser()) continue;
+            if (n.isClickable()) {
+                Rect r = new Rect();
+                n.getBoundsInScreen(r);
+                // A la izquierda del campo de búsqueda y a su misma altura.
+                boolean leftOfField = r.right <= fieldRect.left + 4 && r.width() < screen.width() * 0.25f;
+                boolean sameRow = r.centerY() >= fieldRect.top - 20 && r.centerY() <= fieldRect.bottom + 20;
+                if (leftOfField && sameRow) return n;
+            }
+            for (int i = 0; i < n.getChildCount(); i++) {
+                AccessibilityNodeInfo c = n.getChild(i);
+                if (c != null) queue.add(c);
+            }
+        }
+        return null;
     }
 
     /**

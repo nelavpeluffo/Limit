@@ -95,6 +95,8 @@ final class Blocker {
             else Toast.makeText(service.getApplicationContext(), message, Toast.LENGTH_SHORT).show();
         });
 
+        if (iconRes == 0) return outer;   // zona invisible que solo atrapa el toque
+
         FrameLayout box = new FrameLayout(service);
         GradientDrawable bg = new GradientDrawable();
         bg.setColor(0xFF9364FF);
