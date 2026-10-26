@@ -84,7 +84,7 @@ public class LimitService extends AccessibilityService {
     private int swipeAttempt;
     // Aviso "Seguidos" después de pasarte de Para ti con las pestañas escondidas.
     private long noticeUntil;
-    private static final long RED_MS = 2500;
+    private static final long RED_MS = 4000;   // todos los globos con mensaje: 4 s
     private static final long VIOLET_MS = 4000;
     private final Runnable noticeToViolet = () -> {
         if (SystemClock.elapsedRealtime() >= noticeUntil) return;
@@ -117,7 +117,8 @@ public class LimitService extends AccessibilityService {
     protected void onServiceConnected() {
         usage = new Usage(this);
         overlay = new Overlay(this);
-        blocker = new Blocker(this);
+        blocker = new Blocker(this, R.drawable.ic_lock,
+                () -> notice("Reels está bloqueado hasta mañana", Overlay.VIOLET));
         searchBlocker = new Blocker(this, R.drawable.ic_search, this::openInstagramSearch);
         cover = new Cover(this);
         lockNotice = new LockNotice(this);
@@ -231,7 +232,7 @@ public class LimitService extends AccessibilityService {
                     + " → " + (reel ? "es un Reel" : "no es un Reel"));
         }
         if (usage.remaining(Kind.REELS) > 0 || !reel) return;
-        toast("Reels está bloqueado hasta mañana");
+        notice("Reels está bloqueado hasta mañana", Overlay.VIOLET);
         handler.postDelayed(() -> performGlobalAction(GLOBAL_ACTION_BACK), 300);
         handler.postDelayed(this::closeLeftoverPreview, 1200);
     }
@@ -299,7 +300,7 @@ public class LimitService extends AccessibilityService {
 
     /**
      * Te pasamos de Para ti a Siguiendo: la pastillita roja de
-     * "límite alcanzado" queda 2,5 s y después se vuelve violeta, con brillo, y dice
+     * "límite alcanzado" queda 4 s y después se vuelve violeta, con brillo, y dice
      * "Siguiendo" durante 4 s, como aviso del cambio de pestaña. Después desaparece.
      */
     private void startSwitchNotice() {
@@ -307,8 +308,19 @@ public class LimitService extends AccessibilityService {
         handler.removeCallbacks(noticeEnd);
         noticeUntil = SystemClock.elapsedRealtime() + RED_MS + VIOLET_MS;
         overlay.show(Kind.FOR_YOU.label + ": límite de hoy alcanzado", true);
-        handler.postDelayed(noticeToViolet, RED_MS);  // roja 2,5 s, después violeta 4 s
+        handler.postDelayed(noticeToViolet, RED_MS);  // roja 4 s, después violeta 4 s
     }
+
+    /** Globo con un mensaje: queda 4 s a la vista, para que dé tiempo a leerlo. */
+    private void notice(String text, int color) {
+        handler.removeCallbacks(noticeToViolet);
+        handler.removeCallbacks(noticeEnd);
+        overlay.show(text, color);
+        noticeUntil = SystemClock.elapsedRealtime() + NOTICE_MS;
+        handler.postDelayed(noticeEnd, NOTICE_MS);
+    }
+
+    private static final long NOTICE_MS = 4000;
 
     private void cancelNotice() {
         noticeUntil = 0;
@@ -396,16 +408,19 @@ public class LimitService extends AccessibilityService {
             if (remaining <= 0) {
                 // En X la pastillita roja (y después la violeta) la maneja el aviso de cambio.
                 // En la lupa no: ahí ya no se llega a ver nada (el reloj te lleva al Inicio).
-                if (k == Kind.REELS && !"lupa".equals(igSection) && !"busqueda".equals(igSection)) {
-                    overlay.show(k.label + ": límite de hoy alcanzado", true);
+                if (k == Kind.REELS && !"lupa".equals(igSection) && !"busqueda".equals(igSection)
+                        && now >= noticeUntil) {
+                    notice(k.label + ": límite de hoy alcanzado", Overlay.RED);
                 }
                 enforce(k);
             } else {
                 enforceStreak = 0;
                 if (remaining <= 60_000 && usage.markWarned(k)) {
-                    toast("Te queda 1 minuto de " + k.label + " por hoy");
+                    notice("Te queda 1 minuto de " + k.label, Overlay.RED);
                 }
-                if (AppSettings.overlayEnabled(this)) {
+                if (now < noticeUntil) {
+                    // Hay un mensaje a la vista: el contador espera a que termine.
+                } else if (AppSettings.overlayEnabled(this)) {
                     overlay.show(k.label + " · quedan " + Usage.format(remaining), remaining <= 60_000);
                 } else {
                     overlay.hide();
@@ -1298,7 +1313,6 @@ public class LimitService extends AccessibilityService {
         if (now - lastEnforce < gap) return;
         if (now - lastEnforce > 15_000) {
             enforceStreak = 0;
-            if (k == Kind.REELS) toast("Ya usaste tus 15 minutos de " + k.label + " de hoy");
         }
         lastEnforce = now;
         enforceStreak++;
@@ -1312,7 +1326,7 @@ public class LimitService extends AccessibilityService {
 
         AccessibilityNodeInfo root = getRootInActiveWindow();
         if (k == Kind.FOR_YOU) {
-            // Pastillita roja al instante; a los 2,5 s pasa a la violeta "Siguiendo".
+            // Pastillita roja al instante; a los 4 s pasa a la violeta "Siguiendo".
             if (now >= noticeUntil) startSwitchNotice();
             if (root != null) {
                 Rect screen = new Rect();

@@ -15,7 +15,7 @@ import android.widget.ImageView;
  * y se va solo. No recibe toques.
  */
 final class LockNotice {
-    private static final long SHOW_MS = 2200;
+    private static final long SHOW_MS = 4000;
 
     private final AccessibilityService service;
     private final WindowManager wm;
