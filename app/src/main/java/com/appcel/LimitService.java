@@ -54,6 +54,7 @@ public class LimitService extends AccessibilityService {
     private Cover cover;
     private Blocker backCatcher;   // zona invisible sobre la flecha de atrás del buscador
     private boolean holdingBack;
+    private boolean exploreCheckQueued;
     private long searchFlowUntil;
     private long exploreRedirectUntil;
     private boolean xCovered;
@@ -167,6 +168,7 @@ public class LimitService extends AccessibilityService {
         searchBlocker.hide();
         backCatcher.hide();
         cover.hide();
+        cover.disarm();
         xCovered = false;
         cancelNotice();
         overlay.hide();
@@ -416,6 +418,7 @@ public class LimitService extends AccessibilityService {
     /** Pone o saca la tapa con candado sobre el botón de Reels o de Para ti. */
     private void updateBlocker(AccessibilityNodeInfo root, String pkg) {
         if (root != null && IG.equals(pkg) && usage.remaining(Kind.REELS) <= 0) {
+            cover.arm();   // el reloj queda listo para tapar la grilla al instante
             // Con un Reel o la sección Reels abierta, la barra de abajo no está: sin candados.
             if (reelsTabSelected(root) || reelsPlayerFullScreen(root)) {
                 blocker.hide();
@@ -432,6 +435,7 @@ public class LimitService extends AccessibilityService {
         }
         backCatcher.hide();
         searchBlocker.hide();
+        if (root != null && pkg != null) cover.disarm();
         // En X no se pone candado: al cumplir el límite se pasa a Siguiendo.
         blocker.hide();
     }
@@ -464,7 +468,14 @@ public class LimitService extends AccessibilityService {
     private void quickCheckExplore() {
         if (usage.remaining(Kind.REELS) > 0) return;
         long now = SystemClock.elapsedRealtime();
-        if (now < searchFlowUntil || now < exploreRedirectUntil || now - lastExploreCheck < 50) return;
+        if (now < searchFlowUntil || now < exploreRedirectUntil) return;
+        if (now - lastExploreCheck < 50) {
+            if (!exploreCheckQueued) {
+                exploreCheckQueued = true;
+                handler.postDelayed(() -> { exploreCheckQueued = false; quickCheckExplore(); }, 50);
+            }
+            return;
+        }
         lastExploreCheck = now;
         try {
             AccessibilityNodeInfo root = getRootInActiveWindow();
@@ -478,12 +489,76 @@ public class LimitService extends AccessibilityService {
         long now = SystemClock.elapsedRealtime();
         if (now < exploreRedirectUntil) return;
         exploreRedirectUntil = now + 1200;
-        cover.show();
-        List<AccessibilityNodeInfo> homeTab = root.findAccessibilityNodeInfosByViewId(IG_HOME_TAB_ID);
-        boolean ok = homeTab != null && !homeTab.isEmpty() && clickUp(homeTab.get(0));
-        if (!ok) performGlobalAction(GLOBAL_ACTION_BACK);
-        // El reloj queda hasta confirmar que ya estás en el Inicio.
-        handler.postDelayed(() -> hideCoverWhenHome(0), 200);
+        note("Instagram: grilla de la lupa con el límite cumplido → reloj e Inicio");
+        // Primero el reloj; recién cuando ya tapa la pantalla se toca Inicio.
+        cover.show(() -> {
+            AccessibilityNodeInfo r = getRootInActiveWindow();
+            if (r == null || !clickHome(r)) performGlobalAction(GLOBAL_ACTION_BACK);
+            // El reloj queda hasta confirmar que ya estás en el Inicio.
+            handler.postDelayed(() -> hideCoverWhenHome(0), 150);
+        });
+    }
+
+    /** Toca el botón Inicio de Instagram (aunque el teclado lo tape). */
+    private static boolean clickHome(AccessibilityNodeInfo root) {
+        List<AccessibilityNodeInfo> home = root.findAccessibilityNodeInfosByViewId(IG_HOME_TAB_ID);
+        if (home == null) return false;
+        for (AccessibilityNodeInfo h : home) if (h != null && clickUp(h)) return true;
+        return false;
+    }
+
+    private static boolean homeSelected(AccessibilityNodeInfo root) {
+        List<AccessibilityNodeInfo> home = root.findAccessibilityNodeInfosByViewId(IG_HOME_TAB_ID);
+        if (home == null) return false;
+        for (AccessibilityNodeInfo h : home) {
+            if (h != null && h.isVisibleToUser() && (h.isSelected() || isSelectedDown(h, 2))) return true;
+        }
+        return false;
+    }
+
+    private static boolean searchFieldVisible(AccessibilityNodeInfo root) {
+        List<AccessibilityNodeInfo> found = root.findAccessibilityNodeInfosByViewId(IG + ":id/action_bar_search_edit_text");
+        if (found == null) return false;
+        for (AccessibilityNodeInfo n : found) if (n != null && n.isVisibleToUser()) return true;
+        return false;
+    }
+
+    /**
+     * Salir del buscador con el límite cumplido: primero el reloj y, con el reloj
+     * ya en pantalla, directo al Inicio (sin pasar por la grilla de la lupa).
+     */
+    private void leaveSearchToHome() {
+        searchFlowUntil = 0;
+        exploreRedirectUntil = SystemClock.elapsedRealtime() + 6000;   // este camino se encarga
+        backCatcher.hide();
+        cover.show(() -> leaveStep(0));
+    }
+
+    private void leaveStep(int attempt) {
+        try {
+            AccessibilityNodeInfo root = getRootInActiveWindow();
+            CharSequence pkg = root == null ? null : root.getPackageName();
+            if (pkg == null || !IG.contentEquals(pkg)) { finishLeave(0); return; }
+            boolean grid = exploreGridVisible(root);
+            boolean search = searchFieldVisible(root);
+            if (attempt > 0 && homeSelected(root) && !grid && !search) {
+                finishLeave(250);   // un instante más para que el Inicio termine de dibujarse
+                return;
+            }
+            if (attempt == 0 || grid && attempt % 3 == 0) clickHome(root);
+            // Si tocar Inicio no alcanzó (teclado abierto, por ejemplo), ir atrás con el reloj puesto.
+            if (search && (attempt == 3 || attempt == 7)) performGlobalAction(GLOBAL_ACTION_BACK);
+        } catch (Exception ignored) {
+        }
+        if (attempt < 30) handler.postDelayed(() -> leaveStep(attempt + 1), 120);
+        else finishLeave(0);   // nunca queda tapado más de ~4 s
+    }
+
+    private void finishLeave(long delay) {
+        handler.postDelayed(() -> {
+            cover.hide();
+            exploreRedirectUntil = 0;
+        }, delay);
     }
 
     private void hideCoverWhenHome(int attempt) {
@@ -541,27 +616,7 @@ public class LimitService extends AccessibilityService {
      * pantalla antes de que aparezca la grilla, y después te lleva al Inicio.
      */
     private void coverBackFromSearch() {
-        searchFlowUntil = 0;
-        cover.show();
-        handler.postDelayed(() -> afterBackFromSearch(0), 120);
-    }
-
-    private void afterBackFromSearch(int attempt) {
-        try {
-            AccessibilityNodeInfo root = getRootInActiveWindow();
-            CharSequence pkg = root == null ? null : root.getPackageName();
-            if (pkg == null || !IG.contentEquals(pkg)) { cover.hide(); return; }
-            if (exploreGridVisible(root)) {
-                exploreRedirectUntil = 0;
-                redirectExploreToHome(root);   // el reloj ya está puesto; queda hasta el Inicio
-                return;
-            }
-            // Atrás solo cerró el teclado y seguís en el buscador: sacar el reloj.
-            if (attempt >= 3 && inSearchScreen(root)) { cover.hide(); return; }
-        } catch (Exception ignored) {
-        }
-        if (attempt < 12) handler.postDelayed(() -> afterBackFromSearch(attempt + 1), 100);
-        else cover.hide();
+        leaveSearchToHome();
     }
 
     /** Botón "atrás" del teléfono (o el gesto de atrás). */
@@ -571,10 +626,7 @@ public class LimitService extends AccessibilityService {
         if (event.getAction() == android.view.KeyEvent.ACTION_UP && holdingBack) {
             // Se retuvo el "atrás": se ejecuta recién cuando el reloj ya tapa la pantalla.
             holdingBack = false;
-            handler.postDelayed(() -> {
-                performGlobalAction(GLOBAL_ACTION_BACK);
-                handler.postDelayed(() -> afterBackFromSearch(0), 120);
-            }, 80);
+            leaveSearchToHome();
             return true;
         }
         if (event.getAction() == android.view.KeyEvent.ACTION_DOWN
@@ -584,8 +636,6 @@ public class LimitService extends AccessibilityService {
                 CharSequence pkg = root == null ? null : root.getPackageName();
                 if (pkg != null && IG.contentEquals(pkg) && inSearchScreen(root)) {
                     note("Instagram: atrás en el buscador → reloj primero");
-                    searchFlowUntil = 0;
-                    cover.show();
                     holdingBack = true;
                     return true;
                 }
@@ -597,21 +647,8 @@ public class LimitService extends AccessibilityService {
 
     /** Flecha de atrás de Instagram (zona invisible encima): reloj primero, después atrás. */
     private void onBackArrowTapped() {
-        note("Instagram: flecha atrás en el buscador → reloj primero");
-        searchFlowUntil = 0;
-        cover.show();
-        backCatcher.hide();
-        handler.postDelayed(() -> {
-            boolean clicked = false;
-            try {
-                AccessibilityNodeInfo root = getRootInActiveWindow();
-                AccessibilityNodeInfo arrow = root == null ? null : searchBackArrow(root);
-                clicked = arrow != null && clickUp(arrow);
-            } catch (Exception ignored) {
-            }
-            if (!clicked) performGlobalAction(GLOBAL_ACTION_BACK);
-            handler.postDelayed(() -> afterBackFromSearch(0), 120);
-        }, 80);
+        note("Instagram: flecha atrás en el buscador → reloj e Inicio");
+        leaveSearchToHome();
     }
 
     /** La flecha de atrás arriba a la izquierda del buscador de Instagram. */
