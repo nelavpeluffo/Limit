@@ -2,7 +2,7 @@
 
 App para Android que limita a **15 minutos por día**:
 
-- los **Reels de video** de Instagram (la pestaña Reels y los que abrís desde la lupa, el feed o mensajes) y la **lupa** (Explorar), que comparten los mismos 15 minutos. Las fotos y carruseles que aparecen en el reproductor fuera de la lupa no cuentan.
+- los **Reels de video** de Instagram (la pestaña Reels y los que abrís desde la lupa, el feed o mensajes) y la **lupa** (Explorar), que comparten los mismos 15 minutos. Todo lo que abrís desde la lupa cuenta (también fotos y carruseles); en el resto de Instagram, las fotos y carruseles que aparecen en el reproductor no cuentan.
 - la pestaña **Para ti** de X (Twitter)
 
 El resto de Instagram y X (feed, historias, mensajes, la pestaña *Siguiendo*) se puede usar sin límite.
@@ -13,7 +13,6 @@ El resto de Instagram y X (feed, historias, mensajes, la pestaña *Siguiendo*) s
 - Cuando falta 1 minuto, te avisa.
 - Al llegar a 15 minutos te saca: en Instagram te lleva al Inicio y en X te pasa a *Siguiendo*. Si insistís, te manda a la pantalla de inicio del teléfono.
 - Además, los botones de Reels y de la lupa (Instagram) y la pestaña Para ti (X) quedan tapados con un candado lila y no responden hasta la medianoche.
-- Con el límite cumplido, mantener apretado un Reel en la grilla de la lupa cierra la previsualización.
 - El contador se reinicia a la medianoche.
 
 ## Instalarla

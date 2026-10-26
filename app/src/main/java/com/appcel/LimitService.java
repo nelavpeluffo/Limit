@@ -49,6 +49,8 @@ public class LimitService extends AccessibilityService {
     private Overlay overlay;
     private Blocker blocker;        // botón Reels (Instagram) o Para ti (X)
     private Blocker searchBlocker;  // botón de la lupa (Instagram)
+    // Última sección de Instagram vista con la barra de abajo (lupa, reels u otra).
+    private String igSection = "otra";
 
     private boolean ticking;
     private long lastTick;
@@ -397,10 +399,20 @@ public class LimitService extends AccessibilityService {
      * Se busca ese botón por su id o por su nombre "Reels"; no se mira nada más.
      */
     private boolean reelsVisible(AccessibilityNodeInfo root) {
-        // La lupa comparte el mismo límite que Reels: todo el tiempo ahí cuenta.
-        if (searchTabSelected(root)) return true;
-        if (!reelsTabSelected(root) && !reelsPlayerFullScreen(root)) return false;
-        // Carruseles y fotos que Instagram muestra dentro del reproductor no cuentan.
+        AccessibilityNodeInfo search = searchTabButton(root);
+        if (search != null) {
+            // La barra de abajo está visible: anotamos en qué sección estás.
+            boolean inSearch = search.isSelected() || isSelectedDown(search, 2);
+            igSection = inSearch ? "lupa" : (reelsTabSelected(root) ? "reels" : "otra");
+            // La lupa comparte el mismo límite que Reels: todo el tiempo ahí cuenta.
+            if (inSearch) return true;
+        }
+        boolean tab = reelsTabSelected(root);
+        boolean player = reelsPlayerFullScreen(root);
+        if (!tab && !player) return false;
+        // Lo que abrís desde la lupa (fotos y carruseles incluidos) también cuenta.
+        if (player && !tab && "lupa".equals(igSection)) return true;
+        // En otros lados, los carruseles y fotos del reproductor no cuentan.
         return !currentItemIsStill(root);
     }
 
