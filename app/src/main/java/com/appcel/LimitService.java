@@ -605,10 +605,17 @@ public class LimitService extends AccessibilityService {
                 if (++homeStable >= 2) { revealHome(); return; }
             } else {
                 homeStable = 0;
-                // Apenas se ve la barra de abajo (el teclado ya se fue), tocar Inicio.
-                if (homeTabVisible(root) && attempt % 2 == 0) clickHome(root);
-                // Si la barra sigue sin aparecer, salir del buscador con "atrás" (con el reloj puesto).
-                else if (search && (attempt == 5 || attempt == 9)) performGlobalAction(GLOBAL_ACTION_BACK);
+                if (search) {
+                    // En el buscador no está la barra de abajo: primero se sale con la flecha
+                    // de Instagram (debajo del reloj) y ahí aparece la barra con Inicio.
+                    if (attempt % 4 == 0) {
+                        AccessibilityNodeInfo arrow = searchBackArrow(root);
+                        boolean ok = arrow != null && arrow.performAction(AccessibilityNodeInfo.ACTION_CLICK);
+                        if (!ok || attempt >= 12) performGlobalAction(GLOBAL_ACTION_BACK);
+                    }
+                } else if (homeTabVisible(root) && attempt % 2 == 0) {
+                    clickHome(root);
+                }
             }
         } catch (Exception ignored) {
         }
@@ -717,6 +724,11 @@ public class LimitService extends AccessibilityService {
 
     /** La flecha de atrás arriba a la izquierda del buscador de Instagram. */
     private static AccessibilityNodeInfo searchBackArrow(AccessibilityNodeInfo root) {
+        // La flecha tiene nombre propio; tocar el contenedor de al lado no hace nada.
+        List<AccessibilityNodeInfo> byId = root.findAccessibilityNodeInfosByViewId(IG + ":id/action_bar_button_back");
+        if (byId != null) for (AccessibilityNodeInfo b : byId) {
+            if (b != null && b.isVisibleToUser()) return b;
+        }
         Rect screen = new Rect();
         root.getBoundsInScreen(screen);
         List<AccessibilityNodeInfo> field = root.findAccessibilityNodeInfosByViewId(IG + ":id/action_bar_search_edit_text");
