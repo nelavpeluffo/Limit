@@ -130,6 +130,7 @@ public class LimitService extends AccessibilityService {
         lockNotice = new LockNotice(this);
         backCatcher = new Blocker(this, 0, this::onBackArrowTapped);
         profileReelsCatcher = new Blocker(this, 0, this::onProfileReelsCatcherTap);
+        profileReelsCatcher.setRipple(true);   // al tocarla, una onda violeta: "tocaste, pero no hace nada"
         setKeyboardHidden(false);
     }
 
