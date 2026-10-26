@@ -2,7 +2,6 @@ package com.appcel;
 
 import android.accessibilityservice.AccessibilityService;
 import android.content.Intent;
-import android.graphics.Rect;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.PowerManager;
@@ -11,7 +10,6 @@ import android.view.accessibility.AccessibilityEvent;
 import android.view.accessibility.AccessibilityNodeInfo;
 import android.widget.Toast;
 
-import java.util.ArrayDeque;
 import java.util.List;
 import java.util.Locale;
 
@@ -25,16 +23,14 @@ public class LimitService extends AccessibilityService {
     static final String IG = "com.instagram.android";
     static final String X = "com.twitter.android";
 
-    private static final String[] IG_REELS_IDS = {
-            IG + ":id/clips_viewer_view_pager",
-            IG + ":id/clips_video_container",
-            IG + ":id/clips_viewer_container",
-    };
-    private static final String IG_HOME_TAB_ID = IG + ":id/feed_tab";
+    // Solo se buscan estos botones de pestañas; nada más de la pantalla.
+    static final String IG_REELS_TAB_ID = IG + ":id/clips_tab";
+    static final String IG_HOME_TAB_ID = IG + ":id/feed_tab";
+    static final String[] IG_REELS_LABEL = {"Reels"};
 
-    private static final String[] X_FOR_YOU = {"For you", "Para ti", "Para tí", "Para vos"};
-    private static final String[] X_FOLLOWING = {"Following", "Siguiendo"};
-    private static final String[] X_HOME_TAB = {"Home", "Inicio"};
+    static final String[] X_FOR_YOU = {"For you", "Para ti", "Para tí", "Para vos"};
+    static final String[] X_FOLLOWING = {"Following", "Siguiendo"};
+    static final String[] X_HOME_TAB = {"Home", "Inicio"};
 
     private static final long TICK_MS = 1000;
     private static final long IDLE_STOP_MS = 4000;
@@ -197,47 +193,19 @@ public class LimitService extends AccessibilityService {
     }
 
     /**
-     * Instagram: Reels se ve como un video "clips_..." que ocupa casi toda la pantalla.
-     * Los reels que aparecen chiquitos dentro del feed no cuentan.
+     * Instagram: ¿está seleccionado el botón de la pestaña Reels (barra de abajo)?
+     * Se busca ese botón por su id o por su nombre "Reels"; no se mira nada más.
      */
     private boolean reelsVisible(AccessibilityNodeInfo root) {
-        Rect screen = new Rect();
-        root.getBoundsInScreen(screen);
-        if (screen.isEmpty()) return false;
-
-        for (String id : IG_REELS_IDS) {
-            List<AccessibilityNodeInfo> found = root.findAccessibilityNodeInfosByViewId(id);
-            if (found != null) {
-                for (AccessibilityNodeInfo n : found) {
-                    if (n != null && n.isVisibleToUser() && fillsScreen(n, screen)) return true;
-                }
+        List<AccessibilityNodeInfo> byId = root.findAccessibilityNodeInfosByViewId(IG_REELS_TAB_ID);
+        if (byId != null && !byId.isEmpty()) {
+            for (AccessibilityNodeInfo n : byId) {
+                if (n != null && n.isVisibleToUser() && (n.isSelected() || isSelectedDown(n, 2))) return true;
             }
+            return false;
         }
-
-        ArrayDeque<AccessibilityNodeInfo> queue = new ArrayDeque<>();
-        queue.add(root);
-        int seen = 0;
-        while (!queue.isEmpty() && seen < 400) {
-            AccessibilityNodeInfo n = queue.poll();
-            seen++;
-            if (n == null) continue;
-            String id = n.getViewIdResourceName();
-            if (id != null && id.contains("clips_viewer") && n.isVisibleToUser() && fillsScreen(n, screen)) {
-                return true;
-            }
-            for (int i = 0; i < n.getChildCount(); i++) {
-                AccessibilityNodeInfo c = n.getChild(i);
-                if (c != null) queue.add(c);
-            }
-        }
-        return false;
-    }
-
-    private static boolean fillsScreen(AccessibilityNodeInfo n, Rect screen) {
-        Rect r = new Rect();
-        n.getBoundsInScreen(r);
-        if (!r.intersect(screen)) return false;
-        return r.width() >= screen.width() * 0.9f && r.height() >= screen.height() * 0.75f;
+        AccessibilityNodeInfo byName = findExact(root, IG_REELS_LABEL);
+        return byName != null && tabSelected(byName);
     }
 
     /** X: pestaña "Para ti" seleccionada en el Inicio. */
@@ -339,7 +307,7 @@ public class LimitService extends AccessibilityService {
 
     // ------------------------------------------------------------- utilidades
 
-    private static AccessibilityNodeInfo findExact(AccessibilityNodeInfo root, String[] labels) {
+    static AccessibilityNodeInfo findExact(AccessibilityNodeInfo root, String[] labels) {
         for (String label : labels) {
             List<AccessibilityNodeInfo> found = root.findAccessibilityNodeInfosByText(label);
             if (found == null) continue;

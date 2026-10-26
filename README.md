@@ -2,7 +2,7 @@
 
 App para Android que limita a **15 minutos por día**:
 
-- los **Reels** de Instagram
+- la pestaña **Reels** de Instagram
 - la pestaña **Para ti** de X (Twitter)
 
 El resto de Instagram y X (feed, historias, mensajes, la pestaña *Siguiendo*) se puede usar sin límite.
@@ -23,7 +23,7 @@ El resto de Instagram y X (feed, historias, mensajes, la pestaña *Siguiendo*) s
 
 ## Privacidad
 
-La app no tiene permiso de internet. Solo mira qué pantalla está abierta en Instagram y X para saber si estás en Reels o en Para ti; no lee ni guarda mensajes ni publicaciones.
+La app no tiene permiso de internet. Solo busca los botones de las pestañas (Reels en Instagram; Para ti / Siguiendo en X) para saber cuál está seleccionada. No recorre el resto de la pantalla, no lee publicaciones ni mensajes y no guarda nada de lo que ves. El modo diagnóstico tampoco guarda textos: solo si esos botones están seleccionados.
 
 ## Compilación
 

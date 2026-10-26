@@ -147,7 +147,7 @@
             android:layout_height="wrap_content"
             android:layout_marginTop="8dp"
             android:lineSpacingExtra="3dp"
-            android:text="Si la app detecta mal, tocá «Empezar diagnóstico» y durante 3 minutos andá por Instagram (Inicio, Reels, Buscar) y por X (Para ti, Siguiendo, Buscar). Mientras tanto no cuenta tiempo. Después tocá «Enviar diagnóstico». El archivo guarda cómo está armada cada pantalla y textos cortos que se ven en ella."
+            android:text="Si la app detecta mal, tocá «Empezar diagnóstico» y durante 3 minutos andá por Instagram (Inicio, Reels, Buscar) y por X (Para ti, Siguiendo, Buscar). Mientras tanto no cuenta tiempo. Después tocá «Enviar diagnóstico». El archivo solo guarda si los botones de las pestañas están seleccionados o no: ningún texto, foto ni mensaje."
             android:textColor="@android:color/black"
             android:textSize="14sp" />
 
@@ -176,7 +176,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:layout_marginTop="16dp"
-            android:text="AppCel solo mira qué pantalla está abierta en Instagram y X. No lee tus mensajes, no guarda nada de lo que ves y no usa internet."
+            android:text="AppCel solo mira los botones de las pestañas de Instagram (Reels) y X (Para ti / Siguiendo) para saber cuál está seleccionada. No lee publicaciones ni mensajes, no guarda nada de lo que ves y no usa internet."
             android:textColor="@color/muted"
             android:textSize="13sp" />
     </LinearLayout>
