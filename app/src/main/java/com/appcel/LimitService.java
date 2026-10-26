@@ -59,6 +59,8 @@ public class LimitService extends AccessibilityService {
     private boolean blockerUpdateQueued;
     private LockNotice lockNotice;
     private boolean profileReelsNoticed;
+    private long lastProfileSeen;
+    private long lastProfileSwitch;
     private boolean keyboardSeenInSearch;   // en este buscador ya estuvo el teclado abierto
     private boolean leaving;   // saliendo del buscador hacia el Inicio, con el reloj puesto
     private int homeStable;   // revisiones seguidas con el Inicio ya puesto
@@ -483,11 +485,15 @@ public class LimitService extends AccessibilityService {
                 return;
             }
             // Perfil con pestaña Reels: en vez de un candado encima, un aviso que se va solo.
-            if (profileReelsTab(root) != null) {
+            AccessibilityNodeInfo profileReels = profileReelsTab(root);
+            if (profileReels != null) {
+                lastProfileSeen = SystemClock.elapsedRealtime();
                 if (!profileReelsNoticed) {
                     profileReelsNoticed = true;
                     lockNotice.show();
                 }
+                // Si entrás a la pestaña Reels del perfil, volvés a la grilla de publicaciones.
+                if (tabSelected(profileReels)) switchProfileToGrid(profileReels);
             } else {
                 profileReelsNoticed = false;
             }
@@ -954,6 +960,81 @@ public class LimitService extends AccessibilityService {
     }
 
     /**
+     * Estás en la pestaña Reels de un perfil: se toca la primera pestaña de esa misma
+     * fila (la grilla de publicaciones), sin salir del perfil.
+     */
+    private void switchProfileToGrid(AccessibilityNodeInfo reelsTab) {
+        long now = SystemClock.elapsedRealtime();
+        if (now - lastProfileSwitch < 600) return;
+        lastProfileSwitch = now;
+        AccessibilityNodeInfo tab = clickableUp(reelsTab);
+        if (tab == null) tab = reelsTab;
+        Rect tr = new Rect();
+        tab.getBoundsInScreen(tr);
+        // Subir hasta la fila que tiene las pestañas una al lado de la otra.
+        AccessibilityNodeInfo row = tab.getParent();
+        for (int level = 0; row != null && level < 4; level++) {
+            AccessibilityNodeInfo best = null;
+            int bestLeft = tr.left;
+            for (int i = 0; i < row.getChildCount(); i++) {
+                AccessibilityNodeInfo c = row.getChild(i);
+                if (c == null || !c.isVisibleToUser()) continue;
+                Rect r = new Rect();
+                c.getBoundsInScreen(r);
+                boolean sameRow = Math.abs(r.centerY() - tr.centerY()) < Math.max(tr.height(), 40)
+                        && r.height() < tr.height() * 2 + 40;
+                if (sameRow && r.left < bestLeft) {
+                    best = c;
+                    bestLeft = r.left;
+                }
+            }
+            if (best != null) {
+                note("Instagram: pestaña Reels de un perfil → grilla del perfil");
+                if (!clickUp(best)) clickDown(best);
+                return;
+            }
+            row = row.getParent();
+        }
+    }
+
+    /** ¿Es una pestaña dentro de una fila de al menos 3 pestañas parecidas una al lado de la otra? */
+    private static boolean inTabRow(AccessibilityNodeInfo n) {
+        AccessibilityNodeInfo tab = clickableUp(n);
+        if (tab == null) tab = n;
+        Rect tr = new Rect();
+        tab.getBoundsInScreen(tr);
+        AccessibilityNodeInfo row = tab.getParent();
+        for (int level = 0; row != null && level < 3; level++) {
+            int same = 0;
+            for (int i = 0; i < row.getChildCount(); i++) {
+                AccessibilityNodeInfo c = row.getChild(i);
+                if (c == null || !c.isVisibleToUser()) continue;
+                Rect r = new Rect();
+                c.getBoundsInScreen(r);
+                if (Math.abs(r.centerY() - tr.centerY()) < Math.max(tr.height() / 2, 20)
+                        && Math.abs(r.height() - tr.height()) < Math.max(tr.height() / 2, 20)) same++;
+            }
+            if (same >= 3) return true;
+            row = row.getParent();
+        }
+        return false;
+    }
+
+    private static boolean clickDown(AccessibilityNodeInfo n) {
+        ArrayDeque<AccessibilityNodeInfo> queue = new ArrayDeque<>();
+        queue.add(n);
+        int seen = 0;
+        while (!queue.isEmpty() && seen < 20) {
+            AccessibilityNodeInfo c = queue.poll();
+            seen++;
+            if (c == null) continue;
+            if (c.isClickable()) return c.performAction(AccessibilityNodeInfo.ACTION_CLICK);
+            for (int i = 0; i < c.getChildCount(); i++) queue.add(c.getChild(i));
+        }
+        return false;
+    }
+
+    /**
      * La pestaña "Reels" de un perfil (no el botón de la barra de abajo). Se busca por
      * su nombre de pestaña, como el resto; no se mira nada del perfil.
      */
@@ -974,6 +1055,7 @@ public class LimitService extends AccessibilityService {
                 Rect r = new Rect();
                 n.getBoundsInScreen(r);
                 if (!bar.isEmpty() && Rect.intersects(r, bar)) continue;
+                if (!inTabRow(n)) continue;   // un título "Reels" suelto (en el feed, etc.) no es la pestaña
                 return n;
             }
         }
@@ -985,6 +1067,12 @@ public class LimitService extends AccessibilityService {
      * Se busca ese botón por su id o por su nombre "Reels"; no se mira nada más.
      */
     private boolean reelsVisible(AccessibilityNodeInfo root) {
+        // En la pestaña Reels de un perfil no se te saca del perfil: se pasa a su grilla.
+        AccessibilityNodeInfo profileReels = profileReelsTab(root);
+        if (profileReels != null && tabSelected(profileReels)) {
+            igSection = "perfil";
+            return false;
+        }
         AccessibilityNodeInfo search = searchTabButton(root);
         if (search != null) {
             // La barra de abajo está visible: anotamos en qué sección estás.
@@ -1358,6 +1446,11 @@ public class LimitService extends AccessibilityService {
                 // En la grilla de la lupa: pantalla violeta con el reloj mientras te lleva al Inicio.
                 if (searchTabSelected(root) && exploreGridVisible(root)) {
                     redirectExploreToHome(root);
+                    return;
+                }
+                // Un Reel abierto desde un perfil: volver al perfil, no al Inicio.
+                if (now - lastProfileSeen < 60_000 && reelsPlayerFullScreen(root)) {
+                    performGlobalAction(GLOBAL_ACTION_BACK);
                     return;
                 }
                 List<AccessibilityNodeInfo> homeTab = root.findAccessibilityNodeInfosByViewId(IG_HOME_TAB_ID);

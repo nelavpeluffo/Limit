@@ -34,9 +34,22 @@ final class Overlay {
     private ValueAnimator glowAnim;
     private WindowManager.LayoutParams lastLp;
 
+    private final boolean bottom;   // abajo de la pantalla en vez de arriba
+    private int iconRes;            // ícono a la izquierda del texto (0 = sin ícono)
+
     Overlay(AccessibilityService service) {
+        this(service, false);
+    }
+
+    Overlay(AccessibilityService service, boolean bottom) {
         this.service = service;
         this.wm = (WindowManager) service.getSystemService(Context.WINDOW_SERVICE);
+        this.bottom = bottom;
+    }
+
+    /** Ícono a la izquierda del texto de la pastillita (0 para ninguno). */
+    void setIcon(int res) {
+        iconRes = res;
     }
 
     void show(String text, boolean alert) {
@@ -138,6 +151,16 @@ final class Overlay {
         bg.setCornerRadius(100 * d);
         pill.setBackground(bg);
         pill.setText(text);
+        if (iconRes != 0) {
+            android.graphics.drawable.Drawable ic = service.getDrawable(iconRes);
+            int sz = (int) (16 * d);
+            if (ic != null) ic.setBounds(0, 0, sz, sz);
+            pill.setCompoundDrawables(ic, null, null, null);
+            pill.setCompoundDrawablePadding((int) (6 * d));
+            pill.setGravity(Gravity.CENTER_VERTICAL);
+        } else {
+            pill.setCompoundDrawables(null, null, null, null);
+        }
 
         if (!shown) {
             WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
@@ -149,9 +172,15 @@ final class Overlay {
                             | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
                             | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
                     PixelFormat.TRANSLUCENT);
-            lp.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
-            // La pastillita queda en el mismo lugar de siempre; el margen es para el brillo.
-            lp.y = statusBarHeight() + (int) (6 * d) - (int) (GLOW_PAD_DP * d);
+            if (bottom) {
+                // Abajo, por encima de la barra de Instagram y de los botones del teléfono.
+                lp.gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
+                lp.y = (int) (110 * d) - (int) (GLOW_PAD_DP * d);
+            } else {
+                lp.gravity = Gravity.TOP | Gravity.CENTER_HORIZONTAL;
+                // La pastillita queda en el mismo lugar de siempre; el margen es para el brillo.
+                lp.y = statusBarHeight() + (int) (6 * d) - (int) (GLOW_PAD_DP * d);
+            }
             try {
                 wm.addView(frame, lp);
                 lastLp = lp;
