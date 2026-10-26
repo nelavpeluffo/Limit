@@ -63,8 +63,15 @@ public class LimitService extends AccessibilityService {
     private long lastQuickCheck;
     // Aviso "Seguidos" después de pasarte de Para ti con las pestañas escondidas.
     private long noticeUntil;
+    private static final long RED_MS = 2500;
+    private static final long VIOLET_MS = 4000;
     private final Runnable noticeToViolet = () -> {
-        if (SystemClock.elapsedRealtime() < noticeUntil) overlay.showGlowing("Siguiendo", Overlay.VIOLET);
+        if (SystemClock.elapsedRealtime() >= noticeUntil) return;
+        overlay.showGlowing("Siguiendo", Overlay.VIOLET);
+        // Los 4 s se cuentan desde que aparece la violeta (no desde la roja).
+        noticeUntil = SystemClock.elapsedRealtime() + VIOLET_MS;
+        handler.removeCallbacks(this.noticeEnd);
+        handler.postDelayed(this.noticeEnd, VIOLET_MS);
     };
     private final Runnable noticeEnd = () -> {
         noticeUntil = 0;
@@ -227,10 +234,9 @@ public class LimitService extends AccessibilityService {
     private void startSwitchNotice() {
         handler.removeCallbacks(noticeToViolet);
         handler.removeCallbacks(noticeEnd);
-        noticeUntil = SystemClock.elapsedRealtime() + 6500;
+        noticeUntil = SystemClock.elapsedRealtime() + RED_MS + VIOLET_MS;
         overlay.show(Kind.FOR_YOU.label + ": límite de hoy alcanzado", true);
-        handler.postDelayed(noticeToViolet, 2500);   // roja 2,5 s…
-        handler.postDelayed(noticeEnd, 6500);        // …y violeta con brillo 4 s
+        handler.postDelayed(noticeToViolet, RED_MS);  // roja 2,5 s, después violeta 4 s
     }
 
     private void cancelNotice() {
