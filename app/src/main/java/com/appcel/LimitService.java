@@ -50,7 +50,9 @@ public class LimitService extends AccessibilityService {
     private Usage usage;
     private Overlay overlay;
     private Blocker blocker;        // botón Reels (Instagram) o Para ti (X)
-    private Blocker searchBlocker;  // botón de la lupa (Instagram)
+    private Blocker searchBlocker;  // botón de la lupa (Instagram): abre el buscador
+    private Cover cover;
+    private long searchFlowUntil;
     // Última sección de Instagram vista con la barra de abajo (lupa, reels u otra).
     private String igSection = "otra";
 
@@ -99,7 +101,8 @@ public class LimitService extends AccessibilityService {
         usage = new Usage(this);
         overlay = new Overlay(this);
         blocker = new Blocker(this);
-        searchBlocker = new Blocker(this);
+        searchBlocker = new Blocker(this, R.drawable.ic_search, this::openInstagramSearch);
+        cover = new Cover(this);
     }
 
     @Override
@@ -148,6 +151,7 @@ public class LimitService extends AccessibilityService {
         }
         blocker.hide();
         searchBlocker.hide();
+        cover.hide();
         cancelNotice();
         overlay.hide();
     }
@@ -383,7 +387,7 @@ public class LimitService extends AccessibilityService {
                 searchBlocker.hide();
                 return;
             }
-            String msg = "Reels y la lupa están bloqueados hasta mañana";
+            String msg = "Reels está bloqueado hasta mañana";
             place(blocker, reelsTabButton(root), root, true, msg);
             place(searchBlocker, searchTabButton(root), root, true, msg);
             return;
@@ -399,6 +403,65 @@ public class LimitService extends AccessibilityService {
         if (tab != null && tab.isVisibleToUser()) tab.getBoundsInScreen(r);
         if (looksLikeTabButton(r, root, bottomBar)) b.show(r, msg);
         else b.hide();
+    }
+
+    /** ¿Se ve la grilla de publicaciones de la lupa (Explorar)? */
+    private static boolean exploreGridVisible(AccessibilityNodeInfo root) {
+        for (String name : new String[]{"grid_card_layout_container", "image_button", "image_preview", "play_count_logo"}) {
+            List<AccessibilityNodeInfo> found = root.findAccessibilityNodeInfosByViewId(IG + ":id/" + name);
+            if (found == null) continue;
+            for (AccessibilityNodeInfo n : found) {
+                if (n != null && n.isVisibleToUser()) return true;
+            }
+        }
+        return false;
+    }
+
+    /**
+     * Botón violeta con lupa (límite cumplido): abre el buscador de Instagram directo,
+     * con una cortina oscura un instante para que no se vea la grilla de publicaciones.
+     */
+    private void openInstagramSearch() {
+        searchFlowUntil = SystemClock.elapsedRealtime() + 3000;
+        try {
+            AccessibilityNodeInfo root = getRootInActiveWindow();
+            if (root == null) return;
+            // Si ya está el campo de búsqueda a la vista, solo tocarlo.
+            if (clickSearchField(root)) return;
+            cover.show();
+            AccessibilityNodeInfo tab = searchTabButton(root);
+            if (tab == null || !clickUp(tab)) {
+                cover.hide();
+                return;
+            }
+            handler.postDelayed(() -> focusSearchField(0), 250);
+            handler.postDelayed(cover::hide, 2500);   // por las dudas, nunca queda tapado
+        } catch (Exception e) {
+            cover.hide();
+        }
+    }
+
+    private void focusSearchField(int attempt) {
+        try {
+            AccessibilityNodeInfo root = getRootInActiveWindow();
+            if (root != null && clickSearchField(root)) {
+                handler.postDelayed(cover::hide, 350);
+                return;
+            }
+        } catch (Exception ignored) {
+        }
+        if (attempt < 8) handler.postDelayed(() -> focusSearchField(attempt + 1), 150);
+        else cover.hide();
+    }
+
+    /** Toca la barra "Buscar" de arriba de la lupa, que abre el buscador. */
+    private static boolean clickSearchField(AccessibilityNodeInfo root) {
+        List<AccessibilityNodeInfo> found = root.findAccessibilityNodeInfosByViewId(IG + ":id/action_bar_search_edit_text");
+        if (found == null) return false;
+        for (AccessibilityNodeInfo n : found) {
+            if (n != null && n.isVisibleToUser() && clickUp(n)) return true;
+        }
+        return false;
     }
 
     /** El botón de la lupa (Explorar) de la barra de abajo de Instagram. */
@@ -461,9 +524,19 @@ public class LimitService extends AccessibilityService {
         if (search != null) {
             // La barra de abajo está visible: anotamos en qué sección estás.
             boolean inSearch = search.isSelected() || isSelectedDown(search, 2);
-            igSection = inSearch ? "lupa" : (reelsTabSelected(root) ? "reels" : "otra");
-            // La lupa comparte el mismo límite que Reels: todo el tiempo ahí cuenta.
-            if (inSearch) return true;
+            if (inSearch) {
+                // Yendo al buscador desde el botón violeta: no cuenta ni te saca.
+                if (SystemClock.elapsedRealtime() < searchFlowUntil) {
+                    igSection = "busqueda";
+                    return false;
+                }
+                // La grilla de publicaciones de la lupa comparte el límite con Reels.
+                // Buscar cuentas (sin la grilla a la vista) no cuenta.
+                boolean grid = exploreGridVisible(root);
+                igSection = grid ? "lupa" : "busqueda";
+                return grid;
+            }
+            igSection = reelsTabSelected(root) ? "reels" : "otra";
         }
         boolean tab = reelsTabSelected(root);
         boolean player = reelsPlayerFullScreen(root);

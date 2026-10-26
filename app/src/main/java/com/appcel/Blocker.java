@@ -13,9 +13,9 @@ import android.widget.ImageView;
 import android.widget.Toast;
 
 /**
- * Tapa lila con un candado que se pone justo encima del botón de Reels o de la
- * lupa (Instagram) o de la pestaña Para ti (X) cuando ya se usaron los 15 minutos del día. Se "come" los toques, así
- * que el botón deja de funcionar hasta la medianoche.
+ * Tapa lila que se pone justo encima de un botón de Instagram cuando ya se usaron
+ * los 15 minutos del día. Con candado (Reels) se "come" los toques; con lupa
+ * (la lupa de Instagram) al tocarla abre el buscador sin pasar por la grilla.
  */
 final class Blocker {
     private final AccessibilityService service;
@@ -24,10 +24,20 @@ final class Blocker {
     private boolean shown;
     private final Rect current = new Rect();
     private String message = "";
+    private final int iconRes;
+    private final Runnable onTap;
 
+    /** Con candado: al tocarla solo avisa. */
     Blocker(AccessibilityService service) {
+        this(service, R.drawable.ic_lock, null);
+    }
+
+    /** Con el ícono indicado; si onTap no es null, se ejecuta al tocarla. */
+    Blocker(AccessibilityService service, int iconRes, Runnable onTap) {
         this.service = service;
         this.wm = (WindowManager) service.getSystemService(Context.WINDOW_SERVICE);
+        this.iconRes = iconRes;
+        this.onTap = onTap;
     }
 
     void show(Rect bounds, String message) {
@@ -80,8 +90,10 @@ final class Blocker {
 
         FrameLayout outer = new FrameLayout(service);
         outer.setClickable(true);
-        outer.setOnClickListener(v -> Toast.makeText(service.getApplicationContext(),
-                message, Toast.LENGTH_SHORT).show());
+        outer.setOnClickListener(v -> {
+            if (onTap != null) onTap.run();
+            else Toast.makeText(service.getApplicationContext(), message, Toast.LENGTH_SHORT).show();
+        });
 
         FrameLayout box = new FrameLayout(service);
         GradientDrawable bg = new GradientDrawable();
@@ -94,10 +106,10 @@ final class Blocker {
         boxLp.setMargins(m, m, m, m);
         outer.addView(box, boxLp);
 
-        ImageView lock = new ImageView(service);
-        lock.setImageResource(R.drawable.ic_lock);
-        int size = (int) (22 * d);
-        box.addView(lock, new FrameLayout.LayoutParams(size, size, Gravity.CENTER));
+        ImageView icon = new ImageView(service);
+        icon.setImageResource(iconRes);
+        int size = (int) (24 * d);
+        box.addView(icon, new FrameLayout.LayoutParams(size, size, Gravity.CENTER));
         return outer;
     }
 }
