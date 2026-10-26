@@ -53,6 +53,8 @@ public class LimitService extends AccessibilityService {
     private Blocker searchBlocker;  // botón de la lupa (Instagram): abre el buscador
     private Cover cover;
     private long searchFlowUntil;
+    private long exploreRedirectUntil;
+    private long lastExploreCheck;
     // Última sección de Instagram vista con la barra de abajo (lupa, reels u otra).
     private String igSection = "otra";
 
@@ -128,6 +130,7 @@ public class LimitService extends AccessibilityService {
             trackXEvent(e);
             quickCheckX();
         }
+        if (IG.contentEquals(pkg)) quickCheckExplore();
         if (IG.contentEquals(pkg) && e.getEventType() == AccessibilityEvent.TYPE_VIEW_LONG_CLICKED) {
             onInstagramLongPress(e);
         }
@@ -423,6 +426,36 @@ public class LimitService extends AccessibilityService {
             }
         }
         return false;
+    }
+
+    /**
+     * Con el límite cumplido, apenas aparece la grilla de la lupa (por ejemplo al volver
+     * atrás desde el buscador) se tapa con la pantalla del reloj y se va al Inicio,
+     * sin esperar a la revisión de cada segundo.
+     */
+    private void quickCheckExplore() {
+        if (usage.remaining(Kind.REELS) > 0) return;
+        long now = SystemClock.elapsedRealtime();
+        if (now < searchFlowUntil || now < exploreRedirectUntil || now - lastExploreCheck < 120) return;
+        lastExploreCheck = now;
+        try {
+            AccessibilityNodeInfo root = getRootInActiveWindow();
+            if (root == null || root.getPackageName() == null || !IG.contentEquals(root.getPackageName())) return;
+            if (searchTabSelected(root) && exploreGridVisible(root)) redirectExploreToHome(root);
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void redirectExploreToHome(AccessibilityNodeInfo root) {
+        long now = SystemClock.elapsedRealtime();
+        if (now < exploreRedirectUntil) return;
+        exploreRedirectUntil = now + 1200;
+        cover.show();
+        List<AccessibilityNodeInfo> homeTab = root.findAccessibilityNodeInfosByViewId(IG_HOME_TAB_ID);
+        boolean ok = homeTab != null && !homeTab.isEmpty() && clickUp(homeTab.get(0));
+        if (!ok) performGlobalAction(GLOBAL_ACTION_BACK);
+        // El reloj queda un momento para que la transición se vea suave.
+        handler.postDelayed(cover::hide, 900);
     }
 
     /**
@@ -888,6 +921,11 @@ public class LimitService extends AccessibilityService {
             // Nunca se cierra X: si hiciera falta, se vuelve a intentar en un segundo y medio.
         } else {
             if (root != null) {
+                // En la grilla de la lupa: pantalla violeta con el reloj mientras te lleva al Inicio.
+                if (searchTabSelected(root) && exploreGridVisible(root)) {
+                    redirectExploreToHome(root);
+                    return;
+                }
                 List<AccessibilityNodeInfo> homeTab = root.findAccessibilityNodeInfosByViewId(IG_HOME_TAB_ID);
                 if (homeTab != null && !homeTab.isEmpty() && clickUp(homeTab.get(0))) return;
             }
