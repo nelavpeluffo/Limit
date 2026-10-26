@@ -336,7 +336,7 @@ public class LimitService extends AccessibilityService {
         if (root != null && X.equals(pkg) && usage.remaining(Kind.FOR_YOU) <= 0) {
             Rect screen = new Rect();
             root.getBoundsInScreen(screen);
-            List<AccessibilityNodeInfo> tabs = findTabRow(root, screen, true);
+            List<AccessibilityNodeInfo> tabs = xTopTabs(root, screen);
             AccessibilityNodeInfo forYouTab = tabs != null ? tabs.get(0) : clickableUp(findExact(root, X_FOR_YOU));
             place(blocker, forYouTab, root, false, "Para ti está bloqueado hasta mañana");
         } else {
@@ -508,7 +508,7 @@ public class LimitService extends AccessibilityService {
 
         // Fila de pestañas de arriba del Inicio: la primera (izquierda) es "Para ti".
         // Se reconoce por su forma y por cuál está seleccionada, sin leer textos.
-        List<AccessibilityNodeInfo> tabs = findTabRow(root, screen, true);
+        List<AccessibilityNodeInfo> tabs = xTopTabs(root, screen);
         if (tabs != null) {
             int sel = selectedIndex(tabs);
             if (sel == 0) setForYou(true);
@@ -532,6 +532,27 @@ public class LimitService extends AccessibilityService {
         // Las pestañas se ocultaron al scrollear: seguimos en lo último que vimos,
         // mientras no hayas abierto otra pantalla de X.
         return xForYou && (xActivity == null || xActivity.equals(xForYouActivity));
+    }
+
+    /**
+     * Pestañas de arriba del Inicio de X. Solo se buscan junto al título del
+     * encabezado ("home_navigation_bar_title"), nunca dentro del timeline: así una
+     * tarjeta o galería de un tuit no se confunde con las pestañas.
+     */
+    private static List<AccessibilityNodeInfo> xTopTabs(AccessibilityNodeInfo root, Rect screen) {
+        AccessibilityNodeInfo title = null;
+        for (String id : new String[]{X + ":id/home_navigation_bar_title", "home_navigation_bar_title"}) {
+            List<AccessibilityNodeInfo> found = root.findAccessibilityNodeInfosByViewId(id);
+            if (found == null) continue;
+            for (AccessibilityNodeInfo n : found) {
+                if (n != null && n.isVisibleToUser()) { title = n; break; }
+            }
+            if (title != null) break;
+        }
+        if (title == null) return null;
+        AccessibilityNodeInfo header = title.getParent();
+        if (header == null) return null;
+        return findTabRow(header, screen, true);
     }
 
     /**
@@ -566,9 +587,12 @@ public class LimitService extends AccessibilityService {
                     else if (Math.abs(r.top - rowTop) > 12) continue;  // otra fila (p. ej. el subrayado)
                     row.add(c);
                 }
+                Rect nb = new Rect();
+                n.getBoundsInScreen(nb);
                 boolean inRegion = rowTop != Integer.MIN_VALUE && (top
                         ? rowTop < screen.height() * 0.25f
-                        : rowTop > screen.height() * 0.82f);
+                        // La barra de abajo ocupa todo el ancho (las filas de botones de un tuit no).
+                        : rowTop > screen.height() * 0.82f && nb.width() >= screen.width() * 0.95f);
                 int needed = top ? 2 : 4;
                 if (ok && inRegion && row.size() >= needed) {
                     int selected = 0;
@@ -658,7 +682,7 @@ public class LimitService extends AccessibilityService {
             if (root != null) {
                 Rect screen = new Rect();
                 root.getBoundsInScreen(screen);
-                List<AccessibilityNodeInfo> tabs = findTabRow(root, screen, true);
+                List<AccessibilityNodeInfo> tabs = xTopTabs(root, screen);
                 if (tabs != null && tabs.size() >= 2 && clickUp(tabs.get(1))) {
                     setForYou(false);
                     return;
