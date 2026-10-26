@@ -1,6 +1,7 @@
 package com.appcel;
 
 import android.app.Activity;
+import android.content.ClipData;
 import android.content.ComponentName;
 import android.content.Intent;
 import android.net.Uri;
@@ -8,6 +9,7 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.Settings;
+import android.widget.Button;
 import android.widget.ProgressBar;
 import android.widget.Switch;
 import android.widget.TextView;
@@ -24,7 +26,8 @@ public class MainActivity extends Activity {
     };
 
     private Usage usage;
-    private TextView status, reelsText, xText;
+    private TextView status, reelsText, xText, diagStatus;
+    private Button diagButton, diagSend;
     private ProgressBar reelsBar, xBar;
 
     @Override
@@ -45,6 +48,16 @@ public class MainActivity extends Activity {
         findViewById(R.id.btn_app_info).setOnClickListener(v ->
                 startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
                         Uri.fromParts("package", getPackageName(), null))));
+
+        diagStatus = findViewById(R.id.diag_status);
+        diagButton = findViewById(R.id.btn_diag);
+        diagSend = findViewById(R.id.btn_diag_send);
+        diagButton.setOnClickListener(v -> {
+            if (Diag.recording()) Diag.stop();
+            else Diag.start(this);
+            update();
+        });
+        diagSend.setOnClickListener(v -> shareDiag());
 
         Switch overlaySwitch = findViewById(R.id.overlay_switch);
         overlaySwitch.setChecked(AppSettings.overlayEnabled(this));
@@ -73,6 +86,29 @@ public class MainActivity extends Activity {
 
         show(Kind.REELS, "Reels de Instagram", reelsText, reelsBar);
         show(Kind.FOR_YOU, "Para ti de X", xText, xBar);
+
+        if (Diag.recording()) {
+            diagStatus.setText("Grabando… quedan " + Usage.format(Diag.remainingMs())
+                    + ". Andá a Instagram y X.");
+            diagButton.setText("Terminar diagnóstico");
+        } else {
+            diagStatus.setText(Diag.hasData(this)
+                    ? "Diagnóstico listo para enviar."
+                    : "Sin diagnóstico grabado.");
+            diagButton.setText("Empezar diagnóstico");
+        }
+        diagSend.setEnabled(Diag.hasData(this) && !Diag.recording());
+    }
+
+    private void shareDiag() {
+        android.net.Uri uri = DiagProvider.uri(this);
+        Intent send = new Intent(Intent.ACTION_SEND)
+                .setType("text/plain")
+                .putExtra(Intent.EXTRA_STREAM, uri)
+                .putExtra(Intent.EXTRA_SUBJECT, "Diagnóstico AppCel")
+                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
+        send.setClipData(ClipData.newRawUri("diagnostico", uri));
+        startActivity(Intent.createChooser(send, "Enviar diagnóstico"));
     }
 
     private void show(Kind k, String name, TextView text, ProgressBar bar) {

@@ -132,6 +132,46 @@
             android:layout_height="wrap_content"
             android:text="Abrir info de la app" />
 
+        <!-- Diagnóstico -->
+        <TextView
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="24dp"
+            android:text="Diagnóstico"
+            android:textColor="@android:color/black"
+            android:textSize="17sp"
+            android:textStyle="bold" />
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:lineSpacingExtra="3dp"
+            android:text="Si la app detecta mal, tocá «Empezar diagnóstico» y durante 3 minutos andá por Instagram (Inicio, Reels, Buscar) y por X (Para ti, Siguiendo, Buscar). Mientras tanto no cuenta tiempo. Después tocá «Enviar diagnóstico». El archivo guarda cómo está armada cada pantalla y textos cortos que se ven en ella."
+            android:textColor="@android:color/black"
+            android:textSize="14sp" />
+
+        <TextView
+            android:id="@+id/diag_status"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:textColor="@color/muted"
+            android:textSize="14sp" />
+
+        <Button
+            android:id="@+id/btn_diag"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:layout_marginTop="8dp"
+            android:text="Empezar diagnóstico" />
+
+        <Button
+            android:id="@+id/btn_diag_send"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Enviar diagnóstico" />
+
         <TextView
             android:layout_width="match_parent"
             android:layout_height="wrap_content"

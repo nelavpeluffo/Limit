@@ -2,6 +2,7 @@ package com.appcel;
 
 import android.accessibilityservice.AccessibilityService;
 import android.content.Intent;
+import android.graphics.Rect;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.PowerManager;
@@ -13,7 +14,6 @@ import android.widget.Toast;
 import java.util.ArrayDeque;
 import java.util.List;
 import java.util.Locale;
-import java.util.Objects;
 
 /**
  * Mira qué pantalla está abierta en Instagram y en X (Twitter).
@@ -59,6 +59,12 @@ public class LimitService extends AccessibilityService {
     private boolean xForYouKnown;
     private String xActivity;
     private String xForYouActivity;
+
+    // Diagnóstico
+    private AccessibilityNodeInfo lastRoot;
+    private String lastPkg;
+    private Kind lastDiagKind;
+    private long lastDiagAt;
 
     @Override
     protected void onServiceConnected() {
@@ -112,6 +118,21 @@ public class LimitService extends AccessibilityService {
         long now = SystemClock.elapsedRealtime();
         Kind k = detect();
 
+        if (Diag.recording() && lastPkg != null) {
+            lastActive = now;
+            if (k != lastDiagKind || now - lastDiagAt > 5000) {
+                Diag.record(this, lastPkg, k, lastRoot);
+                lastDiagKind = k;
+                lastDiagAt = now;
+            }
+            String what = k == Kind.NONE ? "nada" : k.label;
+            overlay.show("Diagnóstico · detecto: " + what, false);
+            prevKind = k;
+            lastTick = now;
+            handler.postDelayed(tickRunnable, TICK_MS);
+            return;
+        }
+
         if (k != Kind.NONE) {
             lastActive = now;
             if (prevKind == k) usage.add(k, Math.min(now - lastTick, 2500));
@@ -148,6 +169,8 @@ public class LimitService extends AccessibilityService {
     // ------------------------------------------------------------ detección
 
     private Kind detect() {
+        lastRoot = null;
+        lastPkg = null;
         PowerManager pm = (PowerManager) getSystemService(POWER_SERVICE);
         if (pm != null && !pm.isInteractive()) return Kind.NONE;
 
@@ -160,6 +183,10 @@ public class LimitService extends AccessibilityService {
         if (root == null || root.getPackageName() == null) return Kind.NONE;
 
         String pkg = root.getPackageName().toString();
+        if (IG.equals(pkg) || X.equals(pkg)) {
+            lastRoot = root;
+            lastPkg = pkg;
+        }
         try {
             if (IG.equals(pkg)) return reelsVisible(root) ? Kind.REELS : Kind.NONE;
             if (X.equals(pkg)) return forYouVisible(root) ? Kind.FOR_YOU : Kind.NONE;
@@ -169,13 +196,20 @@ public class LimitService extends AccessibilityService {
         return Kind.NONE;
     }
 
-    /** Instagram: el visor de Reels tiene ids "clips_..."; también la pestaña Reels seleccionada. */
+    /**
+     * Instagram: Reels se ve como un video "clips_..." que ocupa casi toda la pantalla.
+     * Los reels que aparecen chiquitos dentro del feed no cuentan.
+     */
     private boolean reelsVisible(AccessibilityNodeInfo root) {
+        Rect screen = new Rect();
+        root.getBoundsInScreen(screen);
+        if (screen.isEmpty()) return false;
+
         for (String id : IG_REELS_IDS) {
             List<AccessibilityNodeInfo> found = root.findAccessibilityNodeInfosByViewId(id);
             if (found != null) {
                 for (AccessibilityNodeInfo n : found) {
-                    if (n != null && n.isVisibleToUser()) return true;
+                    if (n != null && n.isVisibleToUser() && fillsScreen(n, screen)) return true;
                 }
             }
         }
@@ -188,17 +222,22 @@ public class LimitService extends AccessibilityService {
             seen++;
             if (n == null) continue;
             String id = n.getViewIdResourceName();
-            if (id != null && n.isVisibleToUser()) {
-                if (id.contains("clips_viewer")) return true;
-                if (id.endsWith("/clips_tab") && n.isSelected()) return true;
+            if (id != null && id.contains("clips_viewer") && n.isVisibleToUser() && fillsScreen(n, screen)) {
+                return true;
             }
-            if (n.isSelected() && startsWithLabel(n.getContentDescription(), "Reels")) return true;
             for (int i = 0; i < n.getChildCount(); i++) {
                 AccessibilityNodeInfo c = n.getChild(i);
                 if (c != null) queue.add(c);
             }
         }
         return false;
+    }
+
+    private static boolean fillsScreen(AccessibilityNodeInfo n, Rect screen) {
+        Rect r = new Rect();
+        n.getBoundsInScreen(r);
+        if (!r.intersect(screen)) return false;
+        return r.width() >= screen.width() * 0.9f && r.height() >= screen.height() * 0.75f;
     }
 
     /** X: pestaña "Para ti" seleccionada en el Inicio. */
@@ -213,26 +252,30 @@ public class LimitService extends AccessibilityService {
 
         AccessibilityNodeInfo forYou = findExact(root, X_FOR_YOU);
         AccessibilityNodeInfo following = findExact(root, X_FOLLOWING);
+        boolean forYouSel = forYou != null && tabSelected(forYou);
+        boolean followingSel = following != null && tabSelected(following);
 
-        if (forYou != null) {
-            if (isSelectedUp(forYou)) {
-                setForYou(true);
-            } else if (following != null && isSelectedUp(following)) {
-                setForYou(false);
-            } else if (!xForYouKnown) {
-                // X no indica cuál está seleccionada: "Para ti" es la pestaña por defecto.
-                setForYou(true);
-            }
-            return xForYou;
-        }
-        if (following != null && isSelectedUp(following)) {
-            setForYou(false);
-            return false;
-        }
+        // Solo cuenta si "Para ti" figura seleccionada y "Siguiendo" no
+        // (o si tocaste "Para ti" y todavía no cambiaste).
+        if (forYouSel && !followingSel) setForYou(true);
+        else if (followingSel && !forYouSel) setForYou(false);
+
+        if (forYou != null && following != null) return xForYou;
 
         // Las pestañas se ocultaron al scrollear: seguimos en lo último que vimos,
         // mientras no hayas abierto otra pantalla de X.
-        return xForYou && Objects.equals(xActivity, xForYouActivity);
+        return xForYou && xActivity != null && xActivity.equals(xForYouActivity);
+    }
+
+    /** ¿La pestaña (el botón tocable que contiene este texto) está seleccionada? */
+    private static boolean tabSelected(AccessibilityNodeInfo n) {
+        AccessibilityNodeInfo cur = n;
+        for (int i = 0; cur != null && i < 4; i++) {
+            if (cur.isSelected()) return true;
+            if (cur.isClickable()) return isSelectedDown(cur, 2);
+            cur = cur.getParent();
+        }
+        return false;
     }
 
     private void setForYou(boolean value) {
