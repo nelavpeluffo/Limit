@@ -671,8 +671,9 @@ public class LimitService extends AccessibilityService {
         lastEnforce = now;
         enforceStreak++;
 
-        // Si los intentos suaves no funcionan, vamos a la pantalla de inicio del teléfono.
-        if (enforceStreak >= 4) {
+        // En Instagram, si los intentos suaves no funcionan, vamos a la pantalla de inicio
+        // del teléfono. En X nunca: solo se cambia de Para ti a Siguiendo.
+        if (k == Kind.REELS && enforceStreak >= 4) {
             performGlobalAction(GLOBAL_ACTION_HOME);
             return;
         }
@@ -692,14 +693,15 @@ public class LimitService extends AccessibilityService {
                     setForYou(false);
                     return;
                 }
-                // Tocar "Inicio" (primer botón de abajo) sube al principio y vuelve a mostrar las pestañas.
+                // Las pestañas están escondidas porque bajaste: subir un poco el timeline
+                // hace que X las vuelva a mostrar; en el próximo intento se toca Siguiendo.
+                AccessibilityNodeInfo list = findTimeline(root, screen);
+                if (list != null && list.performAction(AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD)) return;
+                // Si no, tocar "Inicio" (primer botón de abajo) también las vuelve a mostrar.
                 List<AccessibilityNodeInfo> bottom = findTabRow(root, screen, false);
-                if (bottom != null && clickUp(bottom.get(0))) return;
-                // Tocar "Inicio" sube al principio y vuelve a mostrar las pestañas.
-                AccessibilityNodeInfo home = findExact(root, X_HOME_TAB);
-                if (home != null && clickUp(home)) return;
+                if (bottom != null) clickUp(bottom.get(0));
             }
-            performGlobalAction(GLOBAL_ACTION_HOME);
+            // Nunca se cierra X: se vuelve a intentar en un segundo y medio.
         } else {
             if (root != null) {
                 List<AccessibilityNodeInfo> homeTab = root.findAccessibilityNodeInfosByViewId(IG_HOME_TAB_ID);
@@ -707,6 +709,28 @@ public class LimitService extends AccessibilityService {
             }
             performGlobalAction(GLOBAL_ACTION_BACK);
         }
+    }
+
+    /** La lista grande que se puede desplazar (el timeline de X). */
+    private static AccessibilityNodeInfo findTimeline(AccessibilityNodeInfo root, Rect screen) {
+        ArrayDeque<AccessibilityNodeInfo> queue = new ArrayDeque<>();
+        queue.add(root);
+        int seen = 0;
+        while (!queue.isEmpty() && seen < 300) {
+            AccessibilityNodeInfo n = queue.poll();
+            seen++;
+            if (n == null || !n.isVisibleToUser()) continue;
+            if (n.isScrollable()) {
+                Rect r = new Rect();
+                n.getBoundsInScreen(r);
+                if (r.height() >= screen.height() * 0.5f) return n;
+            }
+            for (int i = 0; i < n.getChildCount(); i++) {
+                AccessibilityNodeInfo c = n.getChild(i);
+                if (c != null) queue.add(c);
+            }
+        }
+        return null;
     }
 
     // ------------------------------------------------------------- utilidades
