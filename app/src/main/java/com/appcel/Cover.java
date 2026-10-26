@@ -64,7 +64,7 @@ final class Cover {
             return;
         }
         anim = ValueAnimator.ofFloat(0f, 1f);
-        anim.setDuration(900);
+        anim.setDuration(1800);   // una vuelta cada 1,8 s
         anim.setRepeatCount(ValueAnimator.INFINITE);
         anim.setInterpolator(new LinearInterpolator());
         anim.addUpdateListener(a -> spinner.setPhase((float) a.getAnimatedValue()));
