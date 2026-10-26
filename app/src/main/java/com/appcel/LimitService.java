@@ -61,6 +61,8 @@ public class LimitService extends AccessibilityService {
 
     private long lastEnforce;
     private long lastQuickCheck;
+    private long swipePendingUntil;
+    private int swipeAttempt;
     // Aviso "Seguidos" después de pasarte de Para ti con las pestañas escondidas.
     private long noticeUntil;
     private static final long RED_MS = 2500;
@@ -763,18 +765,10 @@ public class LimitService extends AccessibilityService {
                     performGlobalAction(GLOBAL_ACTION_BACK);
                     return;
                 }
-                // Pestañas escondidas (bajaste): pasar directo a la página de la derecha
-                // (Siguiendo), como si deslizaras el dedo hacia la izquierda.
-                if (pageToFollowing(root)) {
-                    setForYou(false);
-                    return;
-                }
-                // Si no se pudo: subir un poco el timeline para que X muestre las pestañas
-                // y enseguida tocar Siguiendo.
-                AccessibilityNodeInfo list = findTimeline(root, screen);
-                if (list != null && list.performAction(AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD)) {
-                    handler.postDelayed(this::clickXFollowing, 300);
-                }
+                // Pestañas escondidas (bajaste): deslizar el dedo de derecha a izquierda
+                // sobre el timeline, como harías vos para pasar a Siguiendo.
+                if (now < swipePendingUntil) return;   // ya hay un deslizamiento en curso
+                swipeToFollowing(root, screen);
             }
             // Nunca se cierra X: si hiciera falta, se vuelve a intentar en un segundo y medio.
         } else {
@@ -784,6 +778,108 @@ public class LimitService extends AccessibilityService {
             }
             performGlobalAction(GLOBAL_ACTION_BACK);
         }
+    }
+
+    /**
+     * Simula un deslizamiento de derecha a izquierda (Para ti → Siguiendo). Después
+     * se confirma que de verdad cambió: el timeline que se ve tiene que ser otro.
+     * Si no cambió, se intenta a otra altura o se suben las pestañas y se toca Siguiendo.
+     */
+    private void swipeToFollowing(AccessibilityNodeInfo root, Rect screen) {
+        final AccessibilityNodeInfo before = findVerticalList(root, screen);
+        // Se alterna la altura del gesto por si a esa altura hay una galería de fotos.
+        float[] heights = {0.55f, 0.35f, 0.75f};
+        float y = screen.top + screen.height() * heights[swipeAttempt % heights.length];
+        swipeAttempt++;
+        android.graphics.Path path = new android.graphics.Path();
+        path.moveTo(screen.left + screen.width() * 0.88f, y);
+        path.lineTo(screen.left + screen.width() * 0.12f, y);
+        android.accessibilityservice.GestureDescription gesture =
+                new android.accessibilityservice.GestureDescription.Builder()
+                        .addStroke(new android.accessibilityservice.GestureDescription.StrokeDescription(path, 0, 180))
+                        .build();
+        swipePendingUntil = SystemClock.elapsedRealtime() + 1500;
+        boolean sent;
+        try {
+            sent = dispatchGesture(gesture, null, null);
+        } catch (Exception e) {
+            sent = false;
+        }
+        note("X: deslizamiento hacia Siguiendo " + (sent ? "enviado" : "no permitido"));
+        if (!sent) {
+            swipePendingUntil = 0;
+            revealTabsAndClick(root, screen);
+            return;
+        }
+        handler.postDelayed(() -> verifySwitch(before), 700);
+    }
+
+    private void verifySwitch(AccessibilityNodeInfo before) {
+        swipePendingUntil = 0;
+        try {
+            AccessibilityNodeInfo root = getRootInActiveWindow();
+            if (root == null || root.getPackageName() == null || !X.contentEquals(root.getPackageName())) return;
+            Rect screen = new Rect();
+            root.getBoundsInScreen(screen);
+            List<AccessibilityNodeInfo> tabs = xTopTabs(root, screen);
+            if (tabs != null) {
+                // Las pestañas se ven: ellas dicen dónde estás (lo resuelve la detección normal).
+                if (selectedIndex(tabs) > 0) { setForYou(false); swipeAttempt = 0; }
+                return;
+            }
+            AccessibilityNodeInfo after = findVerticalList(root, screen);
+            if (before != null && after != null && !after.equals(before)) {
+                // El timeline que se ve es otro: ya estás en Siguiendo.
+                setForYou(false);
+                swipeAttempt = 0;
+                note("X: confirmado, pasó a Siguiendo");
+            } else {
+                note("X: el deslizamiento no cambió de pestaña");
+                if (swipeAttempt >= 2) revealTabsAndClick(root, screen);
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    /** Plan B: subir el timeline para que X muestre las pestañas y tocar Siguiendo. */
+    private void revealTabsAndClick(AccessibilityNodeInfo root, Rect screen) {
+        AccessibilityNodeInfo list = findVerticalList(root, screen);
+        if (list != null && list.performAction(AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD)) {
+            handler.postDelayed(this::clickXFollowing, 350);
+        }
+    }
+
+    /** La lista del timeline (se desplaza hacia arriba/abajo, no hacia los costados). */
+    private static AccessibilityNodeInfo findVerticalList(AccessibilityNodeInfo root, Rect screen) {
+        ArrayDeque<AccessibilityNodeInfo> queue = new ArrayDeque<>();
+        queue.add(root);
+        int seen = 0;
+        while (!queue.isEmpty() && seen < 300) {
+            AccessibilityNodeInfo n = queue.poll();
+            seen++;
+            if (n == null || !n.isVisibleToUser()) continue;
+            if (n.isScrollable()) {
+                Rect r = new Rect();
+                n.getBoundsInScreen(r);
+                boolean horizontal = false;
+                for (AccessibilityNodeInfo.AccessibilityAction a : n.getActionList()) {
+                    int id = a.getId();
+                    if (id == android.R.id.accessibilityActionScrollLeft
+                            || id == android.R.id.accessibilityActionScrollRight
+                            || (android.os.Build.VERSION.SDK_INT >= 29
+                                && (id == android.R.id.accessibilityActionPageLeft
+                                    || id == android.R.id.accessibilityActionPageRight))) {
+                        horizontal = true;
+                    }
+                }
+                if (!horizontal && r.height() >= screen.height() * 0.5f) return n;
+            }
+            for (int i = 0; i < n.getChildCount(); i++) {
+                AccessibilityNodeInfo c = n.getChild(i);
+                if (c != null) queue.add(c);
+            }
+        }
+        return null;
     }
 
     /** Toca la pestaña Siguiendo (la segunda de arriba) si está visible. */
