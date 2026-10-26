@@ -5,5 +5,5 @@
     android:accessibilityFlags="flagReportViewIds|flagIncludeNotImportantViews"
     android:canRetrieveWindowContent="true"
     android:description="@string/service_description"
-    android:notificationTimeout="300"
+    android:notificationTimeout="150"
     android:settingsActivity="com.appcel.MainActivity" />

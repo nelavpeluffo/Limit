@@ -60,6 +60,7 @@ public class LimitService extends AccessibilityService {
     private Kind prevKind = Kind.NONE;
 
     private long lastEnforce;
+    private long lastQuickCheck;
     private int enforceStreak;
 
     // Estado de X: la barra de pestañas se esconde al scrollear, así que
@@ -99,7 +100,10 @@ public class LimitService extends AccessibilityService {
             }
             return;
         }
-        if (X.contentEquals(pkg)) trackXEvent(e);
+        if (X.contentEquals(pkg)) {
+            trackXEvent(e);
+            quickCheckX();
+        }
         if (IG.contentEquals(pkg) && e.getEventType() == AccessibilityEvent.TYPE_VIEW_LONG_CLICKED) {
             onInstagramLongPress(e);
         }
@@ -191,6 +195,18 @@ public class LimitService extends AccessibilityService {
 
     private void note(String text) {
         if (Diag.recording()) Diag.note(this, text);
+    }
+
+    /**
+     * Con el límite de X cumplido, reaccionar apenas X avisa que cambió algo en
+     * pantalla (sin esperar a la revisión de cada segundo).
+     */
+    private void quickCheckX() {
+        if (Diag.recording() || usage.remaining(Kind.FOR_YOU) > 0) return;
+        long now = SystemClock.elapsedRealtime();
+        if (now - lastQuickCheck < 150) return;
+        lastQuickCheck = now;
+        if (detect() == Kind.FOR_YOU) enforce(Kind.FOR_YOU);
     }
 
     @Override
@@ -663,7 +679,9 @@ public class LimitService extends AccessibilityService {
 
     private void enforce(Kind k) {
         long now = SystemClock.elapsedRealtime();
-        if (now - lastEnforce < 1500) return;
+        // En X se reintenta cada medio segundo; en Instagram, cada segundo y medio.
+        long gap = k == Kind.FOR_YOU ? 500 : 1500;
+        if (now - lastEnforce < gap) return;
         if (now - lastEnforce > 15_000) {
             enforceStreak = 0;
             toast("Ya usaste tus 15 minutos de " + k.label + " de hoy");
@@ -703,7 +721,7 @@ public class LimitService extends AccessibilityService {
                 // y enseguida tocar Siguiendo.
                 AccessibilityNodeInfo list = findTimeline(root, screen);
                 if (list != null && list.performAction(AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD)) {
-                    handler.postDelayed(this::clickXFollowing, 450);
+                    handler.postDelayed(this::clickXFollowing, 300);
                 }
             }
             // Nunca se cierra X: si hiciera falta, se vuelve a intentar en un segundo y medio.
