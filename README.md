@@ -12,6 +12,7 @@ El resto de Instagram y X (feed, historias, mensajes, la pestaña *Siguiendo*) s
 - Mientras estás en Reels o en Para ti, arriba de la pantalla aparece una pastillita con el tiempo que te queda (se puede ocultar).
 - Cuando falta 1 minuto, te avisa.
 - Al llegar a 15 minutos te saca: en Instagram te lleva al Inicio y en X te pasa a *Siguiendo*. Si insistís, te manda a la pantalla de inicio del teléfono.
+- En Instagram, además, el botón de Reels queda tapado con un candado lila y no responde hasta la medianoche.
 - El contador se reinicia a la medianoche.
 
 ## Instalarla

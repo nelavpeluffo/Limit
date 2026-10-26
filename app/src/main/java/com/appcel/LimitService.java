@@ -2,6 +2,7 @@ package com.appcel;
 
 import android.accessibilityservice.AccessibilityService;
 import android.content.Intent;
+import android.graphics.Rect;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.PowerManager;
@@ -40,6 +41,7 @@ public class LimitService extends AccessibilityService {
 
     private Usage usage;
     private Overlay overlay;
+    private Blocker blocker;
 
     private boolean ticking;
     private long lastTick;
@@ -66,6 +68,7 @@ public class LimitService extends AccessibilityService {
     protected void onServiceConnected() {
         usage = new Usage(this);
         overlay = new Overlay(this);
+        blocker = new Blocker(this);
     }
 
     @Override
@@ -73,6 +76,16 @@ public class LimitService extends AccessibilityService {
         if (usage == null || e == null) return;
         CharSequence pkg = e.getPackageName();
         if (pkg != null && X.contentEquals(pkg)) trackXEvent(e);
+        if (pkg != null && IG.contentEquals(pkg)) {
+            // Reaccionar enseguida (sin esperar al próximo segundo) para tapar el botón a tiempo.
+            try {
+                AccessibilityNodeInfo root = getRootInActiveWindow();
+                if (root != null && root.getPackageName() != null && IG.contentEquals(root.getPackageName())) {
+                    updateBlocker(root);
+                }
+            } catch (Exception ignored) {
+            }
+        }
         startTicking();
     }
 
@@ -107,12 +120,17 @@ public class LimitService extends AccessibilityService {
         handler.removeCallbacks(tickRunnable);
         prevKind = Kind.NONE;
         if (overlay != null) overlay.hide();
+        if (blocker != null) blocker.hide();
     }
 
     private void tick() {
         if (!ticking) return;
         long now = SystemClock.elapsedRealtime();
         Kind k = detect();
+
+        if (IG.equals(lastPkg)) updateBlocker(lastRoot);
+        else blocker.hide();
+        if (blocker.isShown()) lastActive = now;
 
         if (Diag.recording() && lastPkg != null) {
             lastActive = now;
@@ -190,6 +208,35 @@ public class LimitService extends AccessibilityService {
             // Si la app cambia algo raro en su interfaz, no rompemos el servicio.
         }
         return Kind.NONE;
+    }
+
+    /** Pone o saca la tapa con candado sobre el botón de Reels. */
+    private void updateBlocker(AccessibilityNodeInfo root) {
+        if (root == null || usage.remaining(Kind.REELS) > 0) {
+            blocker.hide();
+            return;
+        }
+        AccessibilityNodeInfo tab = reelsTabButton(root);
+        Rect r = new Rect();
+        if (tab != null && tab.isVisibleToUser()) tab.getBoundsInScreen(r);
+        if (r.width() < 10 || r.height() < 10) blocker.hide();
+        else blocker.show(r);
+    }
+
+    /** El botón de la pestaña Reels de la barra de abajo de Instagram. */
+    private static AccessibilityNodeInfo reelsTabButton(AccessibilityNodeInfo root) {
+        List<AccessibilityNodeInfo> byId = root.findAccessibilityNodeInfosByViewId(IG_REELS_TAB_ID);
+        if (byId != null) {
+            for (AccessibilityNodeInfo n : byId) {
+                if (n != null && n.isVisibleToUser()) return n;
+            }
+        }
+        AccessibilityNodeInfo n = findExact(root, IG_REELS_LABEL);
+        for (int i = 0; n != null && i < 4; i++) {
+            if (n.isClickable()) return n;
+            n = n.getParent();
+        }
+        return null;
     }
 
     /**
