@@ -43,12 +43,22 @@ final class Cover {
 
     void arm() { ui.post(this::armImpl); }
     void disarm() { ui.post(this::disarmImpl); }
+    static final int VIOLET = 0xFF9364FF;   // buscador de Instagram (como el fondo del ícono)
+    static final int DARK = 0xFF1C1C1C;     // pase entre Reels del chat
+
+    private int color = VIOLET;
+
     void show() { show(null, 0); }
     void show(Runnable onShown) { show(onShown, 0); }
+    void show(Runnable onShown, long fadeInMs) { show(onShown, fadeInMs, VIOLET); }
     /** onShown corre en el hilo principal, cuando el reloj ya tapa la pantalla. */
-    void show(Runnable onShown, long fadeInMs) {
+    void show(Runnable onShown, long fadeInMs, int background) {
         Runnable onMain = onShown == null ? null : () -> main.post(onShown);
-        ui.post(() -> showImpl(onMain, fadeInMs));
+        ui.post(() -> {
+            color = background;
+            if (view != null) view.setBackgroundColor(color);
+            showImpl(onMain, fadeInMs);
+        });
     }
     void fadeOut(long ms) { ui.post(() -> fadeOutImpl(ms)); }
     void hide() { ui.post(this::hideImpl); }
@@ -152,8 +162,7 @@ final class Cover {
             spinner = new ClockSpinner(service, d);
             int size = (int) (72 * d);
             view.addView(spinner, new FrameLayout.LayoutParams(size, size, Gravity.CENTER));
-            // Fondo gris muy oscuro (#1C1C1C); el reloj sigue igual.
-            view.setBackgroundColor(0xFF1C1C1C);
+            view.setBackgroundColor(color);
         }
         view.setAlpha(0f);
         WindowManager.LayoutParams lp = new WindowManager.LayoutParams(

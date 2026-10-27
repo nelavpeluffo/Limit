@@ -84,6 +84,7 @@ public class LimitService extends AccessibilityService {
     private boolean dmOlderIsBackward = true;   // "hacia mensajes más viejos" = desplazar hacia atrás
     private final List<Rect> lastThreadBubbles = new ArrayList<>();
     private final List<Integer> lastThreadRows = new ArrayList<>();
+    private final List<Boolean> lastThreadHidden = new ArrayList<>();
     private final Rect lastThreadList = new Rect();   // contorno violeta: Reel de un mensaje con el límite cumplido
     private boolean profileReelsNoticed;
     private long lastProfileSeen;
@@ -1549,11 +1550,20 @@ public class LimitService extends AccessibilityService {
     private void rememberThreadBubbles(AccessibilityNodeInfo root) {
         lastThreadBubbles.clear();
         lastThreadRows.clear();
+        lastThreadHidden.clear();
         for (AccessibilityNodeInfo n : threadBubbles(root)) {
             Rect r = new Rect();
             n.getBoundsInScreen(r);
             lastThreadBubbles.add(r);
             lastThreadRows.add(rowOf(n));
+            // Al abrir un mensaje, Instagram suele esconder su miniatura mientras la agranda.
+            boolean hidden = false;
+            List<AccessibilityNodeInfo> img = n.findAccessibilityNodeInfosByViewId(IG + ":id/image");
+            if (img != null) {
+                hidden = !img.isEmpty();
+                for (AccessibilityNodeInfo m : img) if (m != null && m.isVisibleToUser()) hidden = false;
+            }
+            lastThreadHidden.add(hidden);
         }
         Rect list = visibleBounds(root, "message_list");
         if (list != null) lastThreadList.set(list);
@@ -1611,21 +1621,34 @@ public class LimitService extends AccessibilityService {
             dmOpenedByLimit = false;
             return;
         }
-        if (SystemClock.elapsedRealtime() - dmNavOpenedAt < 3000) return;   // se supo por el toque en el chat
+        if (SystemClock.elapsedRealtime() - dmNavOpenedAt < 10_000) return;   // se supo por el toque en el chat
         dmCurNode = null;
         dmCurrentRect.setEmpty();
         dmCurrentRow = -1;
         if (lastThreadBubbles.isEmpty()) return;
-        float mid = lastThreadList.isEmpty() ? 1200 : lastThreadList.exactCenterY();
         int best = -1;
-        for (int i = 0; i < lastThreadBubbles.size(); i++) {
-            Rect b = lastThreadBubbles.get(i);
-            if (best < 0 || Math.abs(b.exactCenterY() - mid) < Math.abs(lastThreadBubbles.get(best).exactCenterY() - mid)) best = i;
+        String how = "el más visible";
+        // 1) El que tenía la miniatura escondida (Instagram la estaba agrandando).
+        int hiddenCount = 0;
+        for (int i = 0; i < lastThreadHidden.size(); i++) if (lastThreadHidden.get(i)) { hiddenCount++; best = i; }
+        if (hiddenCount == 1) how = "su miniatura se escondió al abrirse";
+        else best = -1;
+        // 2) Si no, el que más se veía en pantalla (el que tenías a la vista para tocar).
+        if (best < 0) {
+            float mid = lastThreadList.isEmpty() ? 1200 : lastThreadList.exactCenterY();
+            for (int i = 0; i < lastThreadBubbles.size(); i++) {
+                Rect b = lastThreadBubbles.get(i);
+                if (best < 0) { best = i; continue; }
+                Rect c = lastThreadBubbles.get(best);
+                long ab = (long) b.width() * b.height(), ac = (long) c.width() * c.height();
+                if (ab > ac * 1.15f || (ab * 1.15f >= ac && Math.abs(b.exactCenterY() - mid) < Math.abs(c.exactCenterY() - mid))) best = i;
+            }
         }
         if (best >= 0) {
             dmCurrentRect.set(lastThreadBubbles.get(best));
             dmCurrentRow = lastThreadRows.get(best);
-            note("Instagram: abriste uno del chat; supongo el " + dmCurrentRow + " (había " + lastThreadBubbles.size() + " a la vista)");
+            note("Instagram: abriste uno del chat; supongo el " + dmCurrentRow + " (" + how + "; había "
+                    + lastThreadBubbles.size() + " a la vista)");
         }
     }
 
@@ -1658,7 +1681,7 @@ public class LimitService extends AccessibilityService {
         cover.show(() -> {
             performGlobalAction(GLOBAL_ACTION_BACK);
             handler.postDelayed(() -> dmWaitThread(dir, 0), 90);
-        });
+        }, 0, Cover.DARK);
         // Por las dudas, nunca queda tapado más de 15 s.
         final long startedAt = SystemClock.elapsedRealtime();
         dmNavStartedAt = startedAt;
