@@ -42,6 +42,12 @@ final class Diag {
         //noinspection ResultOfMethodCallIgnored
         file(c).delete();
         until = SystemClock.elapsedRealtime() + DURATION_MS;
+        String version = "?";
+        try {
+            version = c.getPackageManager().getPackageInfo(c.getPackageName(), 0).versionName;
+        } catch (Exception ignored) {
+        }
+        note(c, "Limit " + version);
     }
 
     static void stop() {

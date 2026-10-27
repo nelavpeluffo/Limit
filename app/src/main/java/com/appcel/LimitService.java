@@ -1631,10 +1631,25 @@ public class LimitService extends AccessibilityService {
             List<AccessibilityNodeInfo> bubbles = threadBubbles(root);
             Rect cur = dmCurrentNow(bubbles, scrolls == 0);
             if (cur == null && scrolls == 0) {
-                // No se sabe cuál Reel estabas viendo: quedarse en el chat.
-                note("Instagram: no reconocí qué Reel del chat estabas viendo");
-                dmFinish();
-                return;
+                // No se sabe cuál estabas viendo: se toma el que está más al centro del chat.
+                AccessibilityNodeInfo list0 = firstVisible(root, "message_list");
+                Rect lr = new Rect();
+                if (list0 != null) list0.getBoundsInScreen(lr);
+                float mid = lr.isEmpty() ? 1200 : lr.exactCenterY();
+                for (AccessibilityNodeInfo b : bubbles) {
+                    Rect r = new Rect();
+                    b.getBoundsInScreen(r);
+                    if (cur == null || Math.abs(r.exactCenterY() - mid) < Math.abs(cur.exactCenterY() - mid)) {
+                        cur = r;
+                        dmCurNode = b;
+                    }
+                }
+                if (cur == null) {
+                    note("Instagram: no hay Reels ni publicaciones a la vista en el chat");
+                    dmFinish();
+                    return;
+                }
+                note("Instagram: no supe cuál estabas viendo; tomé el del centro del chat");
             }
             AccessibilityNodeInfo target = null;
             float bestY = 0;
