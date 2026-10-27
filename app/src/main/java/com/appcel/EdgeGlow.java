@@ -32,7 +32,7 @@ final class EdgeGlow {
     void show() {
         if (shown) return;
         float d = service.getResources().getDisplayMetrics().density;
-        if (view == null) view = new GlowView(service, 220 * d);
+        if (view == null) view = new GlowView(service, 110 * d);
         WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
                 WindowManager.LayoutParams.MATCH_PARENT,
                 WindowManager.LayoutParams.MATCH_PARENT,   // arriba y abajo de la pantalla
