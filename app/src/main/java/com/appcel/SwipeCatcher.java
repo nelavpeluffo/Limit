@@ -25,18 +25,8 @@ import java.util.List;
  */
 final class SwipeCatcher {
     interface Listener {
-        /**
-         * +1: el dedo fue hacia arriba (Reel siguiente). -1: hacia abajo (anterior).
-         * En modo horizontal: +2 hacia la izquierda, -2 hacia la derecha.
-         */
+        /** +1: el dedo fue hacia arriba (Reel siguiente). -1: hacia abajo (anterior). */
         void onSwipe(int dir);
-    }
-
-    private boolean horizontal;   // reconoce deslizamientos a los costados (y devuelve el resto)
-
-    SwipeCatcher(AccessibilityService service, Listener listener, boolean horizontal) {
-        this(service, listener);
-        this.horizontal = horizontal;
     }
 
     private final AccessibilityService service;
@@ -121,17 +111,6 @@ final class SwipeCatcher {
                 float dx = b[0] - a[0], dy = b[1] - a[1];
                 float d = service.getResources().getDisplayMetrics().density;
                 float min = 40 * d, slop = 20 * d;
-                if (horizontal) {
-                    boolean side = Math.abs(dx) > Math.abs(dy) * 1.4f && Math.abs(dx) > min;
-                    if (side) {
-                        points.clear();
-                        listener.onSwipe(dx < 0 ? +2 : -2);
-                    } else {
-                        replay(new ArrayList<>(points), Math.max(1, ev.getEventTime() - downTime));
-                        points.clear();
-                    }
-                    return true;
-                }
                 boolean vertical = Math.abs(dy) > Math.abs(dx) * 1.4f;
                 if (vertical && Math.abs(dy) > min) {
                     // Deslizamiento hacia arriba o abajo: Reel siguiente o anterior.

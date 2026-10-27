@@ -167,7 +167,6 @@ public class LimitService extends AccessibilityService {
         lockNotice = new LockNotice(this);
         centerNotice = Overlay.centered(this);
         dmCatcher = new SwipeCatcher(this, this::onDmSwipe);
-        storyCatcher = new SwipeCatcher(this, this::onStoryAdSwipe, true);
         backCatcher = new Blocker(this, 0, this::onBackArrowTapped);
         profileReelsCatcher = new Blocker(this, 0, this::onProfileReelsCatcherTap);
         profileReelsCatcher.setRipple(true);   // al tocarla, una onda violeta: "tocaste, pero no hace nada"
@@ -234,7 +233,6 @@ public class LimitService extends AccessibilityService {
             startTicking();   // saliendo hacia el Inicio: no hace falta revisar nada más
             return;
         }
-        if (IG.contentEquals(pkg)) checkStoryAd();
         if (IG.contentEquals(pkg)) {
             if (e.getEventType() == AccessibilityEvent.TYPE_VIEW_CLICKED) {
                 dmPlayerStable = false;   // tocaste algo: revisar de nuevo enseguida
@@ -293,9 +291,6 @@ public class LimitService extends AccessibilityService {
         cover.disarm();
         lockNotice.hide();
         centerNotice.hide();
-        storyAdActive = false;
-        storyCatcher.hide();
-        muteAd(false);
         dmCatcher.hide();
         dmPlayerStable = false;
         profileReelsNoticed = false;
@@ -427,7 +422,6 @@ public class LimitService extends AccessibilityService {
     @Override
     public boolean onUnbind(Intent intent) {
         if (instance == this) instance = null;
-        muteAd(false);
         stopTicking();
         return super.onUnbind(intent);
     }
@@ -920,13 +914,6 @@ public class LimitService extends AccessibilityService {
     @Override
     protected boolean onKeyEvent(android.view.KeyEvent event) {
         if (paused || event.getKeyCode() != android.view.KeyEvent.KEYCODE_BACK) return false;
-        if (event.getAction() == android.view.KeyEvent.ACTION_DOWN) {
-            storyBackAt = SystemClock.elapsedRealtime();
-            if (storyAdActive) {
-                endStoryAd(false);
-                cover.hide();
-            }
-        }
         if (event.getAction() == android.view.KeyEvent.ACTION_UP && holdingBack) {
             // Se retuvo el "atrás": se ejecuta recién cuando el reloj ya tapa la pantalla.
             holdingBack = false;
@@ -1522,202 +1509,6 @@ public class LimitService extends AccessibilityService {
         } else {
             dmCatcher.hide();
         }
-    }
-
-    // --------------------------------------------- publicidad en las historias de Instagram
-
-    private boolean storyAdActive;      // hay una publicidad tapada y Limit la está pasando
-    private long lastStoryAdCheck;
-    private boolean storyAdCheckQueued;
-    private long storyBackAt;           // última vez que se tocó "atrás" (al cerrar las historias)
-    private SwipeCatcher storyCatcher;  // (sin uso: la persona no tiene que hacer nada)
-    private int storyAdSwipes;          // deslizamientos hechos para esta publicidad
-    private int storyAdDir;             // +1: pasando hacia adelante; -1: volviendo hacia atrás
-    private long storyAdDoneAt;         // cuándo terminó de pasar la última publicidad
-    private int storySettled;           // revisiones seguidas con una historia normal, quieta
-
-    /**
-     * Historias: si aparece una publicidad (Instagram le pone la etiqueta "Publicidad" y un
-     * botón de mensaje propio, que se reconocen por su nombre interno), se tapa con la
-     * pantalla oscura del reloj y la palabra "Publicidad", sin sonido, y Limit la pasa solo.
-     * La pantalla queda quieta encima (sin animación) hasta que se ve, entera y quieta, una
-     * historia que no es publicidad. La persona no tiene que hacer nada.
-     */
-    private void checkStoryAd() {
-        long now = SystemClock.elapsedRealtime();
-        if (now - lastStoryAdCheck < 50) {
-            if (!storyAdCheckQueued) {
-                storyAdCheckQueued = true;
-                handler.postDelayed(() -> { storyAdCheckQueued = false; checkStoryAd(); }, 50);
-            }
-            return;
-        }
-        lastStoryAdCheck = now;
-        if (storyAdActive) return;   // ya se está pasando (lo sigue storyAdStep)
-        try {
-            AccessibilityNodeInfo root = getRootInActiveWindow();
-            CharSequence p = root == null ? null : root.getPackageName();
-            if (p == null || !IG.contentEquals(p)) return;
-            // Cerrando las historias (se tocó "atrás"): no tapar nada mientras se van.
-            if (now - storyBackAt < 900) return;
-            if (!isStoryAd(root)) {
-                storyAdGaveUp = false;
-                return;
-            }
-            if (storyAdGaveUp) return;
-            storyAdActive = true;
-            storyAdSwipes = 0;
-            storySettled = 0;
-            storyAdDir = +1;
-            lastStorySwipeAt = 0;
-            note("Instagram: publicidad en las historias → tapada");
-            cover.show(null, 0, Cover.DARK, storyFace(root), "Publicidad");
-            muteAd(true);
-            // Se desliza recién cuando la publicidad quedó quieta (si se desliza a mitad del
-            // cambio de historia, Instagram lo ignora o vuelve atrás).
-            handler.removeCallbacks(storyAdStepRunnable);
-            handler.postDelayed(storyAdStepRunnable, 40);
-        } catch (Exception ignored) {
-        }
-    }
-
-    private long lastStorySwipeAt;
-    private boolean storyAdGaveUp;      // no se pudo pasar: no insistir hasta que se vaya
-
-    /** Un deslizamiento rápido a lo ancho de la historia (Instagram termina el cambio solo). */
-    private void storySwipe() {
-        Rect face = null;
-        try {
-            AccessibilityNodeInfo root = getRootInActiveWindow();
-            if (root != null) face = storyFace(root);
-        } catch (Exception ignored) {
-        }
-        if (face == null) face = new Rect(0, 0, 1080, 2400);
-        float y = face.exactCenterY();
-        float a = face.left + face.width() * 0.95f, b = face.left + face.width() * 0.05f;
-        Path path = new Path();
-        if (storyAdDir > 0) { path.moveTo(a, y); path.lineTo(b, y); }
-        else { path.moveTo(b, y); path.lineTo(a, y); }
-        dispatchGesture(new GestureDescription.Builder()
-                .addStroke(new GestureDescription.StrokeDescription(path, 0, 200)).build(), null, null);
-        storyAdSwipes++;
-        lastStorySwipeAt = SystemClock.elapsedRealtime();
-        note("Instagram: paso la publicidad (deslizamiento " + storyAdSwipes + ")");
-    }
-
-    private final Runnable storyAdStepRunnable = this::storyAdStep;
-
-    /**
-     * Mientras se pasa: la pantalla se va recién cuando hay una historia normal, entera y
-     * quieta (vista dos veces seguidas). Si sigue la publicidad, se vuelve a deslizar.
-     */
-    private void storyAdStep() {
-        if (!storyAdActive) return;
-        long since = SystemClock.elapsedRealtime();
-        try {
-            AccessibilityNodeInfo root = getRootInActiveWindow();
-            CharSequence p = root == null ? null : root.getPackageName();
-            if (p == null || !IG.contentEquals(p) || visibleBounds(root, "reel_viewer_root") == null) {
-                endStoryAd(true);   // se cerraron las historias o se salió de Instagram
-                return;
-            }
-            boolean still = storyStill(root);
-            if (isStoryAd(root)) {
-                storySettled = 0;
-                // Publicidad quieta: deslizar (y si no pasó, volver a intentar al segundo).
-                if (still && since - lastStorySwipeAt > 1000) {
-                    if (storyAdSwipes >= 5) {
-                        note("Instagram: no pude pasar la publicidad");
-                        storyAdGaveUp = true;
-                        endStoryAd(true);
-                        return;
-                    }
-                    storySwipe();
-                }
-            } else if (still) {
-                if (++storySettled >= 2) {
-                    storyAdDoneAt = since;
-                    endStoryAd(true);
-                    return;
-                }
-            } else {
-                storySettled = 0;   // a mitad del cambio: esperar
-            }
-        } catch (Exception ignored) {
-        }
-        handler.postDelayed(storyAdStepRunnable, 60);
-    }
-
-
-    private String lastStorySig = "";
-
-    /**
-     * ¿La historia que se ve está quieta (no a mitad del giro del cubo)? Se compara dónde
-     * están sus partes con la revisión anterior: si no se movieron, está quieta.
-     * (Algunas publicidades no ocupan todo el ancho, así que no alcanza con mirar el tamaño.)
-     */
-    private boolean storyStill(AccessibilityNodeInfo root) {
-        Rect media = visibleBounds(root, "reel_viewer_media_container");
-        Rect label = visibleBounds(root, "reel_item_sponsored_label_footer_pill");
-        Rect header = visibleBounds(root, "reel_viewer_header");
-        String sig = String.valueOf(media) + label + header;
-        boolean still = media != null && sig.equals(lastStorySig);
-        lastStorySig = sig;
-        return still;
-    }
-
-    private Rect storyFace(AccessibilityNodeInfo root) {
-        Rect screen = new Rect();
-        root.getBoundsInScreen(screen);
-        Rect face = visibleBounds(root, "reel_viewer_root");
-        if (face == null || face.width() < screen.width() / 2) face = new Rect(screen);
-        return face;
-    }
-
-    private static boolean isStoryAd(AccessibilityNodeInfo root) {
-        Rect screen = new Rect();
-        root.getBoundsInScreen(screen);
-        Rect viewer = visibleBounds(root, "reel_viewer_root");
-        // Las historias a pantalla completa (no mientras se achican al cerrarse).
-        if (viewer == null || viewer.height() < screen.height() * 0.8f) return false;
-        for (String name : new String[]{"reel_item_sponsored_label_footer_pill", "sponsored_message_composer_container"}) {
-            Rect r = visibleBounds(root, name);
-            // Que se vea al menos en parte (también a mitad de un cambio de historia).
-            if (r != null && r.right > 0 && r.left < screen.width()) return true;
-        }
-        return false;
-    }
-
-    /** (Ya no se usa: Limit pasa la publicidad solo.) */
-    private void onStoryAdSwipe(int dir) {
-    }
-
-    private boolean adMuted;   // Limit silenció el sonido por una publicidad (y lo tiene que devolver)
-
-    /** Silencia (o devuelve) el sonido de los videos mientras hay una publicidad tapada. */
-    private void muteAd(boolean mute) {
-        try {
-            android.media.AudioManager am = (android.media.AudioManager) getSystemService(AUDIO_SERVICE);
-            if (am == null) return;
-            if (mute && !adMuted) {
-                if (am.isStreamMute(android.media.AudioManager.STREAM_MUSIC)) return;   // ya estaba en silencio
-                am.adjustStreamVolume(android.media.AudioManager.STREAM_MUSIC, android.media.AudioManager.ADJUST_MUTE, 0);
-                adMuted = true;
-            } else if (!mute && adMuted) {
-                am.adjustStreamVolume(android.media.AudioManager.STREAM_MUSIC, android.media.AudioManager.ADJUST_UNMUTE, 0);
-                adMuted = false;
-            }
-        } catch (Exception ignored) {
-        }
-    }
-
-    private void endStoryAd(boolean fade) {
-        muteAd(false);
-        storyAdActive = false;
-        handler.removeCallbacks(storyAdStepRunnable);
-        storyCatcher.hide();
-        if (fade) cover.fadeOut(100);
-        else cover.hide();
     }
 
     /**

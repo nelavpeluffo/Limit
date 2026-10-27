@@ -21,9 +21,7 @@ import android.widget.FrameLayout;
 final class Cover {
     private final AccessibilityService service;
     private final WindowManager wm;
-    private FrameLayout view;     // ventana (transparente)
-    private FrameLayout panel;    // la pantalla del reloj: toda la pantalla o justo sobre una historia
-    private android.widget.TextView label;   // texto debajo del reloj (por ejemplo, "Publicidad")
+    private FrameLayout view;
     private ClockSpinner spinner;
     private ValueAnimator anim;
     private boolean shown;
@@ -55,68 +53,14 @@ final class Cover {
     void show(Runnable onShown, long fadeInMs) { show(onShown, fadeInMs, VIOLET); }
     /** onShown corre en el hilo principal, cuando el reloj ya tapa la pantalla. */
     void show(Runnable onShown, long fadeInMs, int background) {
-        show(onShown, fadeInMs, background, null);
-    }
-
-    /** area: dónde ponerse (null = toda la pantalla); por ejemplo, justo sobre una historia. */
-    void show(Runnable onShown, long fadeInMs, int background, android.graphics.Rect area) {
-        show(onShown, fadeInMs, background, area, null);
-    }
-
-    /** text: texto debajo del reloj (null = sin texto). */
-    void show(Runnable onShown, long fadeInMs, int background, android.graphics.Rect area, String text) {
         Runnable onMain = onShown == null ? null : () -> main.post(onShown);
-        final android.graphics.Rect a = area == null ? null : new android.graphics.Rect(area);
         ui.post(() -> {
             color = background;
-            labelText = text;
-            if (panel != null) panel.setBackgroundColor(color);
-            setArea(a);
+            if (view != null) view.setBackgroundColor(color);
             showImpl(onMain, fadeInMs);
-            applyLabel();
         });
     }
-
-    private String labelText;
-
-    private void applyLabel() {
-        if (label == null) return;
-        if (labelText == null) {
-            label.setVisibility(View.GONE);
-        } else {
-            label.setText(labelText);
-            label.setVisibility(View.VISIBLE);
-        }
-    }
-
-    private WindowManager.LayoutParams lp;
-    private final android.graphics.Rect area = new android.graphics.Rect();
-
-    /** Cambia el lugar de la pantalla del reloj (vacío = toda la pantalla). */
-    private void setArea(android.graphics.Rect a) {
-        android.graphics.Rect want = a == null ? new android.graphics.Rect() : a;
-        if (want.equals(area)) return;
-        area.set(want);
-        applyArea();
-    }
-
-    /** La ventana ocupa siempre toda la pantalla; lo que cambia es dónde está la pantalla del reloj. */
-    private void applyArea() {
-        if (panel == null) return;
-        FrameLayout.LayoutParams p;
-        if (area.isEmpty()) {
-            p = new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT);
-        } else {
-            p = new FrameLayout.LayoutParams(area.width(), area.height());
-            p.leftMargin = area.left;
-            p.topMargin = area.top;
-        }
-        panel.setLayoutParams(p);
-        panel.setAlpha(1f);
-    }
     void fadeOut(long ms) { ui.post(() -> fadeOutImpl(ms)); }
-    /** Se va girando como la cara de un cubo hacia la izquierda (como las historias de Instagram). */
-    void cubeOut(long ms) { ui.post(() -> cubeOutImpl(ms)); }
     void hide() { ui.post(this::hideImpl); }
 
     private boolean attached;   // ventana puesta (visible o transparente)
@@ -142,7 +86,6 @@ final class Cover {
      * cuando ya tapa la pantalla por completo.
      */
     private void showImpl(Runnable onShown, long fadeInMs) {
-        resetTransform();
         if (shown && view.getAlpha() < 1f) {
             // Se estaba yendo con el fundido: vuelve a aparecer entero.
             view.animate().cancel();
@@ -199,42 +142,8 @@ final class Cover {
                 .start();
     }
 
-    private void cubeOutImpl(long ms) {
-        if (!shown || panel == null) return;
-        float d = service.getResources().getDisplayMetrics().density;
-        float w = panel.getWidth() > 0 ? panel.getWidth() : service.getResources().getDisplayMetrics().widthPixels;
-        panel.animate().cancel();
-        panel.setCameraDistance(8000 * d);
-        panel.setPivotX(w);                       // gira sobre su borde derecho…
-        panel.setPivotY(panel.getHeight() / 2f);
-        // Lo más "adelante" posible: apenas más grande que la historia, así sus bordes
-        // no asoman por los costados mientras gira.
-        panel.setScaleX(1.08f);
-        panel.setScaleY(1.08f);
-        panel.animate()
-                .translationX(-w)                // …mientras se corre hacia la izquierda
-                .rotationY(-90f)
-                .setDuration(ms)
-                // Lineal: Limit desliza el dedo a velocidad pareja e Instagram gira
-                // la historia siguiendo al dedo, así los dos van juntos.
-                .setInterpolator(new android.view.animation.LinearInterpolator())
-                .withEndAction(() -> { if (shown) hideImpl(); })
-                .start();
-    }
-
-    /** Vuelve a dejar la pantalla derecha, para la próxima vez que aparezca. */
-    private void resetTransform() {
-        if (panel == null) return;
-        panel.animate().cancel();
-        panel.setTranslationX(0f);
-        panel.setRotationY(0f);
-        panel.setScaleX(1f);
-        panel.setScaleY(1f);
-    }
-
     private void hideImpl() {
         if (view != null) view.animate().cancel();
-        resetTransform();
         if (anim != null) {
             anim.cancel();
             anim = null;
@@ -250,27 +159,13 @@ final class Cover {
         float d = service.getResources().getDisplayMetrics().density;
         if (view == null) {
             view = new FrameLayout(service);
-            view.setClipChildren(false);
-            panel = new FrameLayout(service);
             spinner = new ClockSpinner(service, d);
             int size = (int) (72 * d);
-            panel.addView(spinner, new FrameLayout.LayoutParams(size, size, Gravity.CENTER));
-            label = new android.widget.TextView(service);
-            label.setTextColor(0xFFFFFFFF);
-            label.setTextSize(15);
-            label.setGravity(Gravity.CENTER);
-            FrameLayout.LayoutParams llp = new FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.CENTER);
-            llp.topMargin = (int) (size / 2 + 34 * d);   // debajo del reloj
-            panel.addView(label, llp);
-            label.setVisibility(View.GONE);
-            panel.setBackgroundColor(color);
-            view.addView(panel, new FrameLayout.LayoutParams(
-                    FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
-            applyArea();
+            view.addView(spinner, new FrameLayout.LayoutParams(size, size, Gravity.CENTER));
+            view.setBackgroundColor(color);
         }
         view.setAlpha(0f);
-        lp = new WindowManager.LayoutParams(
+        WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
                 WindowManager.LayoutParams.MATCH_PARENT,
                 WindowManager.LayoutParams.MATCH_PARENT,
                 WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
