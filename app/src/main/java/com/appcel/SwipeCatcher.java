@@ -109,11 +109,19 @@ final class SwipeCatcher {
                 points.add(new float[]{ev.getRawX(), ev.getRawY()});
                 float[] a = points.get(0), b = points.get(points.size() - 1);
                 float dx = b[0] - a[0], dy = b[1] - a[1];
-                float min = 56 * service.getResources().getDisplayMetrics().density;
-                if (Math.abs(dy) > min && Math.abs(dy) > Math.abs(dx) * 1.4f) {
+                float d = service.getResources().getDisplayMetrics().density;
+                float min = 40 * d, slop = 20 * d;
+                boolean vertical = Math.abs(dy) > Math.abs(dx) * 1.4f;
+                if (vertical && Math.abs(dy) > min) {
+                    // Deslizamiento hacia arriba o abajo: Reel siguiente o anterior.
                     points.clear();
                     listener.onSwipe(dy < 0 ? +1 : -1);
+                } else if (vertical && Math.abs(dy) > slop) {
+                    // Un deslizamiento corto hacia arriba/abajo: no se hace nada (si se le
+                    // devolviera a Instagram como toque, pausaría el video).
+                    points.clear();
                 } else {
+                    // Toque, mantener apretado o deslizar a los costados (carruseles): a Instagram.
                     replay(new ArrayList<>(points), Math.max(1, ev.getEventTime() - downTime));
                     points.clear();
                 }

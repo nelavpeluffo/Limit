@@ -1810,8 +1810,14 @@ public class LimitService extends AccessibilityService {
         dmCurrentRect.set(r);
         dmCurrentRow = rowOf(target);
         dmOpenedByLimit = true;
-        // Se toca la imagen (no el texto de abajo, que en algunas publicaciones abre otra cosa).
-        Rect tap = new Rect(r);
+        dmPlayerSeen = 0;
+        dmSettleAndTap(target, dir, null, 0, false);
+    }
+
+    /** Dónde tocar: la imagen del mensaje (no el texto de abajo), como está ahora en pantalla. */
+    private static Rect dmTapRect(AccessibilityNodeInfo target) {
+        Rect tap = new Rect();
+        target.getBoundsInScreen(tap);
         List<AccessibilityNodeInfo> media = target.findAccessibilityNodeInfosByViewId(IG + ":id/media_container");
         if (media != null) for (AccessibilityNodeInfo m : media) {
             if (m != null && m.isVisibleToUser()) {
@@ -1819,17 +1825,43 @@ public class LimitService extends AccessibilityService {
                 break;
             }
         }
-        float x = tap.exactCenterX(), y = tap.exactCenterY();
-        tapAt(x, y);
-        dmPlayerSeen = 0;
-        handler.postDelayed(() -> dmWaitPlayer(x, y, dir, 0), 80);
+        return tap;
+    }
+
+    /**
+     * Antes de tocar, esperar a que el chat termine de moverse (que el mensaje quede
+     * quieto) y, si está cortado en un borde, pedir que se vea entero.
+     */
+    private void dmSettleAndTap(AccessibilityNodeInfo target, int dir, Rect last, int tries, boolean askedShow) {
+        if (!dmNavBusy) return;
+        try {
+            target.refresh();
+            Rect tap = dmTapRect(target);
+            AccessibilityNodeInfo root = getRootInActiveWindow();
+            Rect list = root == null ? null : visibleBounds(root, "message_list");
+            boolean cut = list != null && (tap.top <= list.top + 4 || tap.bottom >= list.bottom - 4 || tap.height() < 250);
+            if (cut && !askedShow) {
+                target.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SHOW_ON_SCREEN.getId());
+                handler.postDelayed(() -> dmSettleAndTap(target, dir, null, tries + 1, true), 160);
+                return;
+            }
+            boolean still = last != null && last.equals(tap);
+            if (!still && tries < 8) {
+                handler.postDelayed(() -> dmSettleAndTap(target, dir, tap, tries + 1, askedShow), 110);
+                return;
+            }
+            tapAt(tap.exactCenterX(), tap.exactCenterY());
+            handler.postDelayed(() -> dmWaitPlayer(target, dir, 0), 80);
+        } catch (Exception ex) {
+            dmFinish();
+        }
     }
 
     /**
      * El reloj queda hasta estar seguro de que se abrió el Reel o la publicación del
      * chat (su reproductor, con la barra para responder), visto dos veces seguidas.
      */
-    private void dmWaitPlayer(float x, float y, int dir, int attempt) {
+    private void dmWaitPlayer(AccessibilityNodeInfo target, int dir, int attempt) {
         if (!dmNavBusy) return;
         try {
             AccessibilityNodeInfo root = getRootInActiveWindow();
@@ -1845,7 +1877,11 @@ public class LimitService extends AccessibilityService {
                 } else {
                     dmPlayerSeen = 0;
                     // Sigue en el chat: el toque no llegó, se vuelve a tocar (como mucho dos veces).
-                    if (thread && (attempt == 12 || attempt == 28)) tapAt(x, y);
+                    if (thread && (attempt == 12 || attempt == 28)) {
+                        target.refresh();
+                        Rect tap = dmTapRect(target);
+                        tapAt(tap.exactCenterX(), tap.exactCenterY());
+                    }
                     // Se abrió otra cosa (no es un Reel ni una publicación, ni el reproductor
                     // cargando): después de 2,5 s, volver y seguir buscando.
                     boolean loading = reelsPlayerFullScreen(root);
@@ -1860,7 +1896,7 @@ public class LimitService extends AccessibilityService {
             }
         } catch (Exception ignored) {
         }
-        if (attempt < 110) handler.postDelayed(() -> dmWaitPlayer(x, y, dir, attempt + 1), 60);
+        if (attempt < 110) handler.postDelayed(() -> dmWaitPlayer(target, dir, attempt + 1), 60);
         else dmFinish();   // nunca más de ~7 s
     }
 
