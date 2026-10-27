@@ -48,6 +48,18 @@ public class MainActivity extends Activity {
         findViewById(R.id.btn_accessibility).setOnClickListener(v ->
                 startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)));
 
+        // Desactivar Limit desde acá (para volver a activarlo hay que pasar por Accesibilidad:
+        // Android no deja que una app se active sola).
+        findViewById(R.id.btn_toggle).setOnClickListener(v -> {
+            LimitService svc = LimitService.instance;
+            if (isServiceEnabled() && svc != null) {
+                svc.turnOff();
+                handler.postDelayed(this::update, 400);
+            } else {
+                startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));
+            }
+        });
+
         findViewById(R.id.btn_app_info).setOnClickListener(v ->
                 startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
                         Uri.fromParts("package", getPackageName(), null))));
@@ -100,6 +112,9 @@ public class MainActivity extends Activity {
                 ? "✓ Activada: el límite está funcionando"
                 : "✗ Desactivada: seguí los pasos de abajo para activarla");
         status.setBackgroundColor(getColor(on ? R.color.ok : R.color.warn));
+        ((android.widget.Button) findViewById(R.id.btn_toggle)).setText(on
+                ? "Desactivar Limit"
+                : "Activar Limit (en Accesibilidad)");
 
         show(Kind.REELS, "Reels y lupa de Instagram", reelsText, reelsBar);
         show(Kind.FOR_YOU, "Para ti de X", xText, xBar);

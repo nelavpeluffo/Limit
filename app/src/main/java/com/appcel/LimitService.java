@@ -153,6 +153,7 @@ public class LimitService extends AccessibilityService {
 
     @Override
     protected void onServiceConnected() {
+        instance = this;
         usage = new Usage(this);
         overlay = new Overlay(this);
         blocker = new Blocker(this, R.drawable.ic_lock,
@@ -414,14 +415,39 @@ public class LimitService extends AccessibilityService {
 
     @Override
     public boolean onUnbind(Intent intent) {
+        if (instance == this) instance = null;
         stopTicking();
         return super.onUnbind(intent);
     }
 
     @Override
     public void onDestroy() {
+        if (instance == this) instance = null;
         stopTicking();
         super.onDestroy();
+    }
+
+    /** El servicio funcionando ahora (para el botón "Desactivar" de la app), o null. */
+    static volatile LimitService instance;
+
+    /** Apaga Limit desde la app: saca todo lo que haya en pantalla y se desactiva. */
+    void turnOff() {
+        try {
+            blocker.hide();
+            searchBlocker.hide();
+            backCatcher.hide();
+            profileReelsCatcher.hide();
+            dmCatcher.hide();
+            lockNotice.hide();
+            cover.hide();
+            cover.disarm();
+            cancelNotice();
+            overlay.hide();
+            setKeyboardHidden(false);
+        } catch (Exception ignored) {
+        }
+        instance = null;
+        disableSelf();
     }
 
     // ---------------------------------------------------------------- reloj
