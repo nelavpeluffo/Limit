@@ -61,7 +61,6 @@ public class LimitService extends AccessibilityService {
     private long lastBlockerUpdate;
     private boolean blockerUpdateQueued;
     private LockNotice lockNotice;
-    private EdgeGlow edgeGlow;
     // Reels de un chat, uno atrás del otro
     private SwipeCatcher dmCatcher;          // zona invisible sobre el video que reconoce el deslizamiento
     private boolean dmNavBusy;               // pasando de un Reel del chat a otro (con el reloj puesto)
@@ -145,7 +144,6 @@ public class LimitService extends AccessibilityService {
         searchBlocker = new Blocker(this, R.drawable.ic_search, this::openInstagramSearch);
         cover = new Cover(this);
         lockNotice = new LockNotice(this);
-        edgeGlow = new EdgeGlow(this);
         dmCatcher = new SwipeCatcher(this, this::onDmSwipe);
         backCatcher = new Blocker(this, 0, this::onBackArrowTapped);
         profileReelsCatcher = new Blocker(this, 0, this::onProfileReelsCatcherTap);
@@ -253,7 +251,6 @@ public class LimitService extends AccessibilityService {
         cover.hide();
         cover.disarm();
         lockNotice.hide();
-        edgeGlow.hide();
         dmCatcher.hide();
         profileReelsNoticed = false;
         if (leaving) { leaving = false; setKeyboardHidden(false); }
@@ -535,16 +532,10 @@ public class LimitService extends AccessibilityService {
                 searchBlocker.hide();
                 backCatcher.hide();
                 profileReelsCatcher.hide();
-                // Un Reel que te mandaron, fuera del límite: contorno violeta con brillo.
-                if (!reelsTabSelected(root) && ("mensajes".equals(igSection) || isDmReel(root))) {
-                    igSection = "mensajes";
-                    edgeGlow.show();
-                }
-                else edgeGlow.hide();
+                if (!reelsTabSelected(root) && isDmReel(root)) igSection = "mensajes";
                 return;
             }
-            edgeGlow.hide();
-            // Perfiles: la pestaña Reels te devuelve a la grilla del perfil (con aviso).
+                // Perfiles: la pestaña Reels te devuelve a la grilla del perfil (con aviso).
             if (!checkProfileReels()) {
                 // Resultados de búsqueda: la pestaña "Reels" te pasa a la primera pestaña.
                 AccessibilityNodeInfo searchReels = profileReelsTab(root);
@@ -560,7 +551,6 @@ public class LimitService extends AccessibilityService {
         backCatcher.hide();
         profileReelsCatcher.hide();
         searchBlocker.hide();
-        edgeGlow.hide();
         if (root != null && pkg != null) cover.disarm();
         // En X no se pone candado: al cumplir el límite se pasa a Siguiendo.
         blocker.hide();
