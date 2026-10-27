@@ -66,6 +66,7 @@ public class LimitService extends AccessibilityService {
     private long profileGoneSince;
     private long lastProfileSwitch;
     private long lastDmScrollBlock;
+    private long lastScrollCheck;
     private long lastReelsTabAction;   // última vez que se tocó/eligió la pestaña Reels de un perfil
     private boolean keyboardSeenInSearch;   // en este buscador ya estuvo el teclado abierto
     private boolean leaving;   // saliendo del buscador hacia el Inicio, con el reloj puesto
@@ -161,10 +162,13 @@ public class LimitService extends AccessibilityService {
         }
         if (e.getEventType() == AccessibilityEvent.TYPE_VIEW_SCROLLED) {
             // Los deslizamientos solo importan en un Reel abierto desde un mensaje.
-            if (IG.contentEquals(pkg) && "mensajes".equals(igSection)) {
+            long nowS = SystemClock.elapsedRealtime();
+            if (IG.contentEquals(pkg) && nowS - lastScrollCheck > 150) {
+                lastScrollCheck = nowS;
                 try {
                     AccessibilityNodeInfo r = getRootInActiveWindow();
-                    if (r != null && reelsPlayerFullScreen(r)) blockDmReelScroll(r);
+                    if (r != null && reelsPlayerFullScreen(r)
+                            && ("mensajes".equals(igSection) || isDmReel(r))) blockDmReelScroll(r);
                 } catch (Exception ignored) {
                 }
             }
@@ -510,7 +514,10 @@ public class LimitService extends AccessibilityService {
                 backCatcher.hide();
                 profileReelsCatcher.hide();
                 // Un Reel que te mandaron, fuera del límite: contorno violeta con brillo.
-                if ("mensajes".equals(igSection) && !reelsTabSelected(root)) edgeGlow.show();
+                if (!reelsTabSelected(root) && ("mensajes".equals(igSection) || isDmReel(root))) {
+                    igSection = "mensajes";
+                    edgeGlow.show();
+                }
                 else edgeGlow.hide();
                 return;
             }
@@ -1318,7 +1325,8 @@ public class LimitService extends AccessibilityService {
         if (!tab && !player) return false;
         // Un Reel que te mandaron por mensaje: se puede ver (no cuenta ni te saca),
         // pero no seguir deslizando a otros.
-        if (player && !tab && "mensajes".equals(igSection)) {
+        if (player && !tab && ("mensajes".equals(igSection) || isDmReel(root))) {
+            igSection = "mensajes";
             blockDmReelScroll(root);
             return false;
         }
@@ -1326,6 +1334,19 @@ public class LimitService extends AccessibilityService {
         if (player && !tab && "lupa".equals(igSection)) return true;
         // En otros lados, los carruseles y fotos del reproductor no cuentan.
         return !currentItemIsStill(root);
+    }
+
+    /**
+     * ¿Es un Reel abierto desde un chat? Instagram le pone abajo la barra para responder
+     * al mensaje y arriba quién te lo mandó (se reconoce por sus nombres internos).
+     */
+    private static boolean isDmReel(AccessibilityNodeInfo root) {
+        for (String name : new String[]{"reel_viewer_message_composer", "sender_username_or_fullname", "reply_bar_container"}) {
+            List<AccessibilityNodeInfo> found = root.findAccessibilityNodeInfosByViewId(IG + ":id/" + name);
+            if (found == null) continue;
+            for (AccessibilityNodeInfo n : found) if (n != null && n.isVisibleToUser()) return true;
+        }
+        return false;
     }
 
     private static boolean directTabSelected(AccessibilityNodeInfo root) {

@@ -118,14 +118,14 @@ final class EdgeGlow {
             int v = 0x9364FF;
             // Franja suave de arriba hacia abajo.
             band.setShader(new android.graphics.LinearGradient(0, 0, 0, h,
-                    new int[]{0x99000000 | v, 0x40000000 | v, 0x00000000 | v},
+                    new int[]{0xCC000000 | v, 0x59000000 | v, 0x00000000 | v},
                     new float[]{0f, 0.45f, 1f}, android.graphics.Shader.TileMode.CLAMP));
             canvas.drawRect(0, 0, w, h, band);
             // Un resplandor más intenso al centro, como una luz que entra desde arriba.
             canvas.save();
             canvas.scale(1f, h / (w * 0.5f), w / 2f, 0);
             bloom.setShader(new android.graphics.RadialGradient(w / 2f, 0, w * 0.5f,
-                    new int[]{0x80000000 | v, 0x00000000 | v}, null, android.graphics.Shader.TileMode.CLAMP));
+                    new int[]{0xA6000000 | v, 0x00000000 | v}, null, android.graphics.Shader.TileMode.CLAMP));
             canvas.drawCircle(w / 2f, 0, w * 0.5f, bloom);
             canvas.restore();
         }
