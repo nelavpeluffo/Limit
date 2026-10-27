@@ -152,8 +152,8 @@ final class Cover {
             spinner = new ClockSpinner(service, d);
             int size = (int) (72 * d);
             view.addView(spinner, new FrameLayout.LayoutParams(size, size, Gravity.CENTER));
-            // Fondo violeta, como el fondo del reloj en el ícono de Limit.
-            view.setBackgroundColor(0xFF9364FF);
+            // Fondo gris muy oscuro (#1C1C1C); el reloj sigue igual.
+            view.setBackgroundColor(0xFF1C1C1C);
         }
         view.setAlpha(0f);
         WindowManager.LayoutParams lp = new WindowManager.LayoutParams(

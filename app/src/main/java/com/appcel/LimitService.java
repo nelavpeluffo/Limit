@@ -1565,6 +1565,11 @@ public class LimitService extends AccessibilityService {
         try {
             AccessibilityNodeInfo src = e.getSource();
             if (src == null) return;
+            if (Diag.recording()) {
+                String sid = src.getViewIdResourceName();
+                note("Instagram: toque en " + (sid == null ? "(sin nombre)" : sid.substring(sid.indexOf('/') + 1))
+                        + " · mensaje " + rowOf(src));
+            }
             // ¿Tocaste un Reel o una publicación compartida? (el mensaje que lo contiene)
             AccessibilityNodeInfo bubble = null;
             AccessibilityNodeInfo cur = src;
