@@ -1560,22 +1560,29 @@ public class LimitService extends AccessibilityService {
             if (p == null || !IG.contentEquals(p)) return;
             // Cerrando las historias (se tocó "atrás"): no tapar nada mientras se van.
             if (now - storyBackAt < 900) return;
-            if (!isStoryAd(root)) return;
+            if (!isStoryAd(root)) {
+                storyAdGaveUp = false;
+                return;
+            }
+            if (storyAdGaveUp) return;
             storyAdActive = true;
             storyAdSwipes = 0;
             storySettled = 0;
-            // Si recién se pasó una publicidad y aparece otra enseguida, es que la persona
-            // está volviendo hacia atrás: se la pasa hacia atrás (si no, no podría volver).
-            storyAdDir = now - storyAdDoneAt < 4000 && lastStoryDirWasForwardSkip ? -1 : +1;
-            note("Instagram: publicidad en las historias → tapada y pasando " + (storyAdDir > 0 ? "adelante" : "atrás"));
+            storyAdDir = +1;
+            lastStorySwipeAt = 0;
+            note("Instagram: publicidad en las historias → tapada");
             cover.show(null, 0, Cover.DARK, storyFace(root), "Publicidad");
             muteAd(true);
-            storySwipe();
+            // Se desliza recién cuando la publicidad quedó quieta (si se desliza a mitad del
+            // cambio de historia, Instagram lo ignora o vuelve atrás).
+            handler.removeCallbacks(storyAdStepRunnable);
+            handler.postDelayed(storyAdStepRunnable, 40);
         } catch (Exception ignored) {
         }
     }
 
-    private boolean lastStoryDirWasForwardSkip;
+    private long lastStorySwipeAt;
+    private boolean storyAdGaveUp;      // no se pudo pasar: no insistir hasta que se vaya
 
     /** Un deslizamiento rápido a lo ancho de la historia (Instagram termina el cambio solo). */
     private void storySwipe() {
@@ -1587,15 +1594,15 @@ public class LimitService extends AccessibilityService {
         }
         if (face == null) face = new Rect(0, 0, 1080, 2400);
         float y = face.exactCenterY();
-        float a = face.left + face.width() * 0.9f, b = face.left + face.width() * 0.1f;
+        float a = face.left + face.width() * 0.95f, b = face.left + face.width() * 0.05f;
         Path path = new Path();
         if (storyAdDir > 0) { path.moveTo(a, y); path.lineTo(b, y); }
         else { path.moveTo(b, y); path.lineTo(a, y); }
         dispatchGesture(new GestureDescription.Builder()
-                .addStroke(new GestureDescription.StrokeDescription(path, 0, 90)).build(), null, null);
+                .addStroke(new GestureDescription.StrokeDescription(path, 0, 200)).build(), null, null);
         storyAdSwipes++;
-        handler.removeCallbacks(storyAdStepRunnable);
-        handler.postDelayed(storyAdStepRunnable, 150);
+        lastStorySwipeAt = SystemClock.elapsedRealtime();
+        note("Instagram: paso la publicidad (deslizamiento " + storyAdSwipes + ")");
     }
 
     private final Runnable storyAdStepRunnable = this::storyAdStep;
@@ -1614,16 +1621,22 @@ public class LimitService extends AccessibilityService {
                 endStoryAd(true);   // se cerraron las historias o se salió de Instagram
                 return;
             }
+            boolean still = storyStill(root);
             if (isStoryAd(root)) {
                 storySettled = 0;
-                storyAdStepCount++;
-                // La publicidad sigue (o vino otra): deslizar de nuevo cada ~0,5 s.
-                if (storyAdStepCount % 8 == 0 && storyAdSwipes < 6) storySwipe();
-                else if (storyAdSwipes >= 6 && storyAdStepCount > 60) { endStoryAd(true); return; }
-            } else if (storyStill(root)) {
+                // Publicidad quieta: deslizar (y si no pasó, volver a intentar al segundo).
+                if (still && since - lastStorySwipeAt > 1000) {
+                    if (storyAdSwipes >= 5) {
+                        note("Instagram: no pude pasar la publicidad");
+                        storyAdGaveUp = true;
+                        endStoryAd(true);
+                        return;
+                    }
+                    storySwipe();
+                }
+            } else if (still) {
                 if (++storySettled >= 2) {
                     storyAdDoneAt = since;
-                    lastStoryDirWasForwardSkip = storyAdDir > 0;
                     endStoryAd(true);
                     return;
                 }
@@ -1635,17 +1648,22 @@ public class LimitService extends AccessibilityService {
         handler.postDelayed(storyAdStepRunnable, 60);
     }
 
-    private int storyAdStepCount;
 
-    /** ¿La historia que se ve está entera y quieta (no a mitad del giro del cubo)? */
-    private static boolean storyStill(AccessibilityNodeInfo root) {
-        Rect screen = new Rect();
-        root.getBoundsInScreen(screen);
-        Rect viewer = visibleBounds(root, "reel_viewer_root");
+    private String lastStorySig = "";
+
+    /**
+     * ¿La historia que se ve está quieta (no a mitad del giro del cubo)? Se compara dónde
+     * están sus partes con la revisión anterior: si no se movieron, está quieta.
+     * (Algunas publicidades no ocupan todo el ancho, así que no alcanza con mirar el tamaño.)
+     */
+    private boolean storyStill(AccessibilityNodeInfo root) {
         Rect media = visibleBounds(root, "reel_viewer_media_container");
-        if (viewer == null || media == null) return false;
-        return Math.abs(media.left - viewer.left) <= 8 && Math.abs(media.right - viewer.right) <= 8
-                && media.height() >= viewer.height() * 0.7f;
+        Rect label = visibleBounds(root, "reel_item_sponsored_label_footer_pill");
+        Rect header = visibleBounds(root, "reel_viewer_header");
+        String sig = String.valueOf(media) + label + header;
+        boolean still = media != null && sig.equals(lastStorySig);
+        lastStorySig = sig;
+        return still;
     }
 
     private Rect storyFace(AccessibilityNodeInfo root) {
@@ -1696,7 +1714,6 @@ public class LimitService extends AccessibilityService {
     private void endStoryAd(boolean fade) {
         muteAd(false);
         storyAdActive = false;
-        storyAdStepCount = 0;
         handler.removeCallbacks(storyAdStepRunnable);
         storyCatcher.hide();
         if (fade) cover.fadeOut(100);
