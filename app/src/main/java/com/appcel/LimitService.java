@@ -59,13 +59,13 @@ public class LimitService extends AccessibilityService {
     private long lastBlockerUpdate;
     private boolean blockerUpdateQueued;
     private LockNotice lockNotice;
+    private EdgeGlow edgeGlow;   // contorno violeta: Reel de un mensaje con el límite cumplido
     private boolean profileReelsNoticed;
     private long lastProfileSeen;
     private long lastProfileNotice;
     private long profileGoneSince;
     private long lastProfileSwitch;
     private long lastDmScrollBlock;
-    private long lastDmScrollNotice;
     private long lastReelsTabAction;   // última vez que se tocó/eligió la pestaña Reels de un perfil
     private boolean keyboardSeenInSearch;   // en este buscador ya estuvo el teclado abierto
     private boolean leaving;   // saliendo del buscador hacia el Inicio, con el reloj puesto
@@ -130,6 +130,7 @@ public class LimitService extends AccessibilityService {
         searchBlocker = new Blocker(this, R.drawable.ic_search, this::openInstagramSearch);
         cover = new Cover(this);
         lockNotice = new LockNotice(this);
+        edgeGlow = new EdgeGlow(this);
         backCatcher = new Blocker(this, 0, this::onBackArrowTapped);
         profileReelsCatcher = new Blocker(this, 0, this::onProfileReelsCatcherTap);
         profileReelsCatcher.setRipple(true);   // al tocarla, una onda violeta: "tocaste, pero no hace nada"
@@ -229,6 +230,7 @@ public class LimitService extends AccessibilityService {
         cover.hide();
         cover.disarm();
         lockNotice.hide();
+        edgeGlow.hide();
         profileReelsNoticed = false;
         if (leaving) { leaving = false; setKeyboardHidden(false); }
         xCovered = false;
@@ -504,8 +506,12 @@ public class LimitService extends AccessibilityService {
                 searchBlocker.hide();
                 backCatcher.hide();
                 profileReelsCatcher.hide();
+                // Un Reel que te mandaron, fuera del límite: contorno violeta con brillo.
+                if ("mensajes".equals(igSection) && !reelsTabSelected(root)) edgeGlow.show();
+                else edgeGlow.hide();
                 return;
             }
+            edgeGlow.hide();
             // Perfiles: la pestaña Reels te devuelve a la grilla del perfil (con aviso).
             if (!checkProfileReels()) {
                 // Resultados de búsqueda: la pestaña "Reels" te pasa a la primera pestaña.
@@ -522,6 +528,7 @@ public class LimitService extends AccessibilityService {
         backCatcher.hide();
         profileReelsCatcher.hide();
         searchBlocker.hide();
+        edgeGlow.hide();
         if (root != null && pkg != null) cover.disarm();
         // En X no se pone candado: al cumplir el límite se pasa a Siguiendo.
         blocker.hide();
@@ -1344,10 +1351,6 @@ public class LimitService extends AccessibilityService {
             note("Instagram: deslizaste desde un Reel de un mensaje → vuelve al Reel");
             boolean back = pager.performAction(AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD);
             if (!back) performGlobalAction(GLOBAL_ACTION_BACK);
-            if (now - lastDmScrollNotice > 4000) {
-                lastDmScrollNotice = now;
-                notice("Solo el Reel que te mandaron", Overlay.VIOLET);
-            }
             return;
         }
     }
