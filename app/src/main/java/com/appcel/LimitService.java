@@ -233,6 +233,7 @@ public class LimitService extends AccessibilityService {
             startTicking();   // saliendo hacia el Inicio: no hace falta revisar nada más
             return;
         }
+        if (IG.contentEquals(pkg)) checkAdMute();
         if (IG.contentEquals(pkg)) {
             if (e.getEventType() == AccessibilityEvent.TYPE_VIEW_CLICKED) {
                 dmPlayerStable = false;   // tocaste algo: revisar de nuevo enseguida
@@ -291,6 +292,7 @@ public class LimitService extends AccessibilityService {
         cover.disarm();
         lockNotice.hide();
         centerNotice.hide();
+        muteAd(false);
         dmCatcher.hide();
         dmPlayerStable = false;
         profileReelsNoticed = false;
@@ -422,6 +424,7 @@ public class LimitService extends AccessibilityService {
     @Override
     public boolean onUnbind(Intent intent) {
         if (instance == this) instance = null;
+        muteAd(false);
         stopTicking();
         return super.onUnbind(intent);
     }
@@ -1508,6 +1511,64 @@ public class LimitService extends AccessibilityService {
             lastDmCheck = SystemClock.elapsedRealtime();
         } else {
             dmCatcher.hide();
+        }
+    }
+
+    // ------------------------------------------- sin sonido en las publicidades (historias)
+
+    private boolean adMuted;   // Limit silenció el sonido por una publicidad (y lo tiene que devolver)
+    private long lastAdMuteCheck;
+    private boolean adMuteQueued;
+
+    /**
+     * Historias de Instagram: mientras se ve una publicidad (Instagram le pone la etiqueta
+     * "Publicidad" y un botón de mensaje propio, que se reconocen por su nombre interno),
+     * el sonido queda en silencio. Al pasar a una historia normal, vuelve.
+     */
+    private void checkAdMute() {
+        long now = SystemClock.elapsedRealtime();
+        if (now - lastAdMuteCheck < 100) {
+            if (!adMuteQueued) {
+                adMuteQueued = true;
+                handler.postDelayed(() -> { adMuteQueued = false; checkAdMute(); }, 100);
+            }
+            return;
+        }
+        lastAdMuteCheck = now;
+        try {
+            AccessibilityNodeInfo root = getRootInActiveWindow();
+            CharSequence p = root == null ? null : root.getPackageName();
+            if (p == null || !IG.contentEquals(p)) return;
+            muteAd(isStoryAd(root));
+        } catch (Exception ignored) {
+        }
+    }
+
+    private static boolean isStoryAd(AccessibilityNodeInfo root) {
+        if (visibleBounds(root, "reel_viewer_root") == null) return false;
+        Rect screen = new Rect();
+        root.getBoundsInScreen(screen);
+        for (String name : new String[]{"reel_item_sponsored_label_footer_pill", "sponsored_message_composer_container"}) {
+            Rect r = visibleBounds(root, name);
+            if (r != null && r.right > 0 && r.left < screen.width()) return true;
+        }
+        return false;
+    }
+
+    /** Silencia (o devuelve) el sonido de los videos. Si ya estaba en silencio, no lo toca. */
+    private void muteAd(boolean mute) {
+        try {
+            android.media.AudioManager am = (android.media.AudioManager) getSystemService(AUDIO_SERVICE);
+            if (am == null) return;
+            if (mute && !adMuted) {
+                if (am.isStreamMute(android.media.AudioManager.STREAM_MUSIC)) return;
+                am.adjustStreamVolume(android.media.AudioManager.STREAM_MUSIC, android.media.AudioManager.ADJUST_MUTE, 0);
+                adMuted = true;
+            } else if (!mute && adMuted) {
+                am.adjustStreamVolume(android.media.AudioManager.STREAM_MUSIC, android.media.AudioManager.ADJUST_UNMUTE, 0);
+                adMuted = false;
+            }
+        } catch (Exception ignored) {
         }
     }
 
