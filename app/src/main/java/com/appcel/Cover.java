@@ -23,6 +23,7 @@ final class Cover {
     private final WindowManager wm;
     private FrameLayout view;     // ventana (transparente)
     private FrameLayout panel;    // la pantalla del reloj: toda la pantalla o justo sobre una historia
+    private android.widget.TextView label;   // texto debajo del reloj (por ejemplo, "Publicidad")
     private ClockSpinner spinner;
     private ValueAnimator anim;
     private boolean shown;
@@ -59,14 +60,33 @@ final class Cover {
 
     /** area: dónde ponerse (null = toda la pantalla); por ejemplo, justo sobre una historia. */
     void show(Runnable onShown, long fadeInMs, int background, android.graphics.Rect area) {
+        show(onShown, fadeInMs, background, area, null);
+    }
+
+    /** text: texto debajo del reloj (null = sin texto). */
+    void show(Runnable onShown, long fadeInMs, int background, android.graphics.Rect area, String text) {
         Runnable onMain = onShown == null ? null : () -> main.post(onShown);
         final android.graphics.Rect a = area == null ? null : new android.graphics.Rect(area);
         ui.post(() -> {
             color = background;
+            labelText = text;
             if (panel != null) panel.setBackgroundColor(color);
             setArea(a);
             showImpl(onMain, fadeInMs);
+            applyLabel();
         });
+    }
+
+    private String labelText;
+
+    private void applyLabel() {
+        if (label == null) return;
+        if (labelText == null) {
+            label.setVisibility(View.GONE);
+        } else {
+            label.setText(labelText);
+            label.setVisibility(View.VISIBLE);
+        }
     }
 
     private WindowManager.LayoutParams lp;
@@ -236,6 +256,15 @@ final class Cover {
             spinner = new ClockSpinner(service, d);
             int size = (int) (72 * d);
             panel.addView(spinner, new FrameLayout.LayoutParams(size, size, Gravity.CENTER));
+            label = new android.widget.TextView(service);
+            label.setTextColor(0xFFFFFFFF);
+            label.setTextSize(15);
+            label.setGravity(Gravity.CENTER);
+            FrameLayout.LayoutParams llp = new FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT, Gravity.CENTER);
+            llp.topMargin = (int) (size / 2 + 34 * d);   // debajo del reloj
+            panel.addView(label, llp);
+            label.setVisibility(View.GONE);
             panel.setBackgroundColor(color);
             view.addView(panel, new FrameLayout.LayoutParams(
                     FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));

@@ -167,6 +167,7 @@ public class LimitService extends AccessibilityService {
         lockNotice = new LockNotice(this);
         centerNotice = Overlay.centered(this);
         dmCatcher = new SwipeCatcher(this, this::onDmSwipe);
+        storyCatcher = new SwipeCatcher(this, this::onStoryAdSwipe, true);
         backCatcher = new Blocker(this, 0, this::onBackArrowTapped);
         profileReelsCatcher = new Blocker(this, 0, this::onProfileReelsCatcherTap);
         profileReelsCatcher.setRipple(true);   // al tocarla, una onda violeta: "tocaste, pero no hace nada"
@@ -293,6 +294,7 @@ public class LimitService extends AccessibilityService {
         lockNotice.hide();
         centerNotice.hide();
         storyAdActive = false;
+        storyCatcher.hide();
         dmCatcher.hide();
         dmPlayerStable = false;
         profileReelsNoticed = false;
@@ -916,6 +918,13 @@ public class LimitService extends AccessibilityService {
     @Override
     protected boolean onKeyEvent(android.view.KeyEvent event) {
         if (paused || event.getKeyCode() != android.view.KeyEvent.KEYCODE_BACK) return false;
+        if (event.getAction() == android.view.KeyEvent.ACTION_DOWN) {
+            storyBackAt = SystemClock.elapsedRealtime();
+            if (storyAdActive) {
+                endStoryAd(false);
+                cover.hide();
+            }
+        }
         if (event.getAction() == android.view.KeyEvent.ACTION_UP && holdingBack) {
             // Se retuvo el "atrás": se ejecuta recién cuando el reloj ya tapa la pantalla.
             holdingBack = false;
@@ -1515,16 +1524,18 @@ public class LimitService extends AccessibilityService {
 
     // --------------------------------------------- publicidad en las historias de Instagram
 
-    private boolean storyAdActive;      // hay una publicidad en pantalla y se está salteando
-    private int storyAdSwipes;
+    private boolean storyAdActive;      // hay una publicidad tapada en pantalla
+    private boolean storyAdLeaving;     // la pantalla se está yendo con el giro del cubo
     private long lastStoryAdCheck;
     private boolean storyAdCheckQueued;
-    private boolean storyAdGaveUp;      // no se pudo saltear: no insistir hasta que se vaya
+    private long storyBackAt;           // última vez que se tocó "atrás" (al cerrar las historias)
+    private SwipeCatcher storyCatcher;  // sobre la publicidad: reconoce el deslizamiento a los costados
 
     /**
      * Historias: si la que se ve es una publicidad (Instagram le pone la etiqueta de
      * "Publicidad" abajo y un botón de mensaje propio, que se reconocen por su nombre
-     * interno), se tapa con la pantalla oscura del reloj y se pasa a la historia siguiente.
+     * interno), se tapa con la pantalla oscura del reloj y la palabra "Publicidad".
+     * La persona la pasa cuando quiere: deslizando, o tocando como siempre.
      */
     private void checkStoryAd() {
         long now = SystemClock.elapsedRealtime();
@@ -1540,52 +1551,83 @@ public class LimitService extends AccessibilityService {
             AccessibilityNodeInfo root = getRootInActiveWindow();
             CharSequence p = root == null ? null : root.getPackageName();
             if (p == null || !IG.contentEquals(p)) return;
-            boolean ad = isStoryAd(root);
-            if (!ad) storyAdGaveUp = false;
-            if (ad && !storyAdActive && !storyAdGaveUp) {
+            // Cerrando las historias (se tocó "atrás"): no tapar nada mientras se van.
+            boolean closing = now - storyBackAt < 900;
+            boolean ad = !closing && isStoryAd(root);
+            if (ad && !storyAdActive && !storyAdLeaving) {
                 storyAdActive = true;
-                storyAdSwipes = 0;
-                note("Instagram: publicidad en las historias → la salteo");
-                skipStoryAd();   // sin esperar al reloj: el reloj no recibe toques, el deslizamiento pasa
-            } else if (!ad && storyAdActive && storyAdSwipes > 0) {
-                endStoryAd();
+                note("Instagram: publicidad en las historias → tapada");
+                Rect face = storyFace(root);
+                cover.show(null, 0, Cover.DARK, face, "Publicidad");
+                storyCatcher.show(face);
+            } else if (!ad && storyAdActive) {
+                endStoryAd(true);
             }
         } catch (Exception ignored) {
         }
     }
 
-    private static boolean isStoryAd(AccessibilityNodeInfo root) {
-        if (visibleBounds(root, "reel_viewer_root") == null) return false;
+    private Rect storyFace(AccessibilityNodeInfo root) {
         Rect screen = new Rect();
         root.getBoundsInScreen(screen);
+        Rect face = visibleBounds(root, "reel_viewer_root");
+        if (face == null || face.width() < screen.width() / 2) face = new Rect(screen);
+        return face;
+    }
+
+    private static boolean isStoryAd(AccessibilityNodeInfo root) {
+        Rect screen = new Rect();
+        root.getBoundsInScreen(screen);
+        Rect viewer = visibleBounds(root, "reel_viewer_root");
+        // Las historias a pantalla completa (no mientras se achican al cerrarse).
+        if (viewer == null || viewer.height() < screen.height() * 0.8f) return false;
         for (String name : new String[]{"reel_item_sponsored_label_footer_pill", "sponsored_message_composer_container"}) {
             Rect r = visibleBounds(root, name);
-            // En la historia que se ve ahora (no en la de al lado, a mitad de un deslizamiento).
-            if (r != null && r.left < screen.width() * 0.6f && r.right > 0) return true;
+            // En la historia que se ve ahora, entera (no en la de al lado, a mitad de un giro).
+            if (r != null && r.left >= -8 && r.right <= screen.width() + 8) return true;
         }
         return false;
     }
 
+    /** Deslizaste sobre la publicidad tapada. */
+    private void onStoryAdSwipe(int dir) {
+        if (!storyAdActive) return;
+        if (dir == +2) {
+            skipStoryAd();
+        } else {
+            // Hacia la derecha: a las historias anteriores (Instagram lo hace solo).
+            storyCatcher.hide();
+            endStoryAd(true);
+            Rect face = new Rect();
+            try {
+                AccessibilityNodeInfo root = getRootInActiveWindow();
+                if (root != null) face = storyFace(root);
+            } catch (Exception ignored) {
+            }
+            if (face.isEmpty()) return;
+            Path path = new Path();
+            path.moveTo(face.left + face.width() * 0.05f, face.exactCenterY());
+            path.lineTo(face.left + face.width() * 0.95f, face.exactCenterY());
+            dispatchGesture(new GestureDescription.Builder()
+                    .addStroke(new GestureDescription.StrokeDescription(path, 0, 250)).build(), null, null);
+        }
+    }
+
     /**
-     * Desliza hacia la izquierda a lo ancho de toda la historia: Instagram gira el cubo
-     * siguiendo al dedo, y la pantalla del reloj (del mismo tamaño y en el mismo lugar que
-     * la historia) gira igual y al mismo ritmo, como si fuera la cara de la publicidad.
+     * Pasar la publicidad: Limit desliza a lo ancho de toda la historia y la pantalla del
+     * reloj (del tamaño de la historia) se va girando con ella, como la cara de un cubo.
      */
     private void skipStoryAd() {
-        if (!storyAdActive) return;
         Rect face = null;
-        Rect screen = new Rect();
         try {
             AccessibilityNodeInfo root = getRootInActiveWindow();
-            if (root != null) {
-                root.getBoundsInScreen(screen);
-                face = visibleBounds(root, "reel_viewer_root");
-            }
+            if (root != null) face = storyFace(root);
         } catch (Exception ignored) {
         }
-        if (screen.isEmpty()) screen.set(0, 0, 1080, 2400);
-        if (face == null || face.width() < screen.width() / 2) face = new Rect(screen);
-        cover.show(null, 0, Cover.DARK, face);
+        if (face == null) face = new Rect(0, 0, 1080, 2400);
+        storyCatcher.hide();   // que el deslizamiento de Limit le llegue a Instagram
+        storyAdActive = false;
+        storyAdLeaving = true;
         float y = face.exactCenterY();
         Path path = new Path();
         path.moveTo(face.left + face.width() * 0.98f, y);
@@ -1593,40 +1635,15 @@ public class LimitService extends AccessibilityService {
         final long ms = 300;
         dispatchGesture(new GestureDescription.Builder()
                 .addStroke(new GestureDescription.StrokeDescription(path, 0, ms)).build(), null, null);
-        storyAdSwipes++;
-        // El giro va apenas adelante del de Instagram: si fuera atrás, el borde de la pantalla
-        // del reloj taparía la historia que entra. Como la pantalla es un poco más grande que
-        // la historia (hacia la izquierda), igual tapa la publicidad que se va.
+        // El giro va apenas adelante del de Instagram, así no tapa la historia que entra.
         cover.cubeOut(ms - 30);
-        handler.removeCallbacks(storyAdFollowUpRunnable);
-        handler.postDelayed(storyAdFollowUpRunnable, ms + 250);
+        handler.postDelayed(() -> storyAdLeaving = false, ms + 150);
     }
 
-    private final Runnable storyAdFollowUpRunnable = this::storyAdFollowUp;
-
-    private void storyAdFollowUp() {
-        if (!storyAdActive) return;
-        try {
-            AccessibilityNodeInfo root = getRootInActiveWindow();
-            if (root != null && isStoryAd(root) && storyAdSwipes < 4) {
-                skipStoryAd();   // otra publicidad (o no pasó): deslizar de nuevo
-                return;
-            }
-            if (root != null && isStoryAd(root)) {
-                storyAdGaveUp = true;
-                note("Instagram: no pude saltear la publicidad");
-            }
-        } catch (Exception ignored) {
-        }
-        endStoryAd();
-    }
-
-    private void endStoryAd() {
-        if (!storyAdActive) return;
+    private void endStoryAd(boolean fade) {
         storyAdActive = false;
-        handler.removeCallbacks(storyAdFollowUpRunnable);
-        // Si ya se deslizó, la pantalla se está yendo con el giro del cubo: no tocarla.
-        if (storyAdSwipes == 0) cover.fadeOut(120);
+        storyCatcher.hide();
+        if (fade && !storyAdLeaving) cover.fadeOut(120);
     }
 
     /**
