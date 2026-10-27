@@ -48,18 +48,19 @@ public class MainActivity extends Activity {
         findViewById(R.id.btn_accessibility).setOnClickListener(v ->
                 startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)));
 
-        // Desactivar Limit desde acá (para volver a activarlo hay que pasar por Accesibilidad:
-        // Android no deja que una app se active sola).
+        // Pausar o reanudar Limit desde acá. Queda activado en Accesibilidad (Android no deja
+        // que una app se active sola), pero en pausa no mira nada ni pone nada en pantalla.
         findViewById(R.id.btn_toggle).setOnClickListener(v -> {
-            LimitService svc = LimitService.instance;
-            if (isServiceEnabled() && svc != null) {
-                svc.turnOff();
-                handler.postDelayed(this::update, 400);
-            } else {
+            if (!isServiceEnabled()) {
                 startActivity(new Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS));
+                return;
             }
+            boolean pause = !AppSettings.paused(this);
+            AppSettings.setPaused(this, pause);
+            LimitService svc = LimitService.instance;
+            if (svc != null) svc.setPaused(pause);
+            update();
         });
-
         findViewById(R.id.btn_app_info).setOnClickListener(v ->
                 startActivity(new Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
                         Uri.fromParts("package", getPackageName(), null))));
@@ -107,14 +108,18 @@ public class MainActivity extends Activity {
     }
 
     private void update() {
-        boolean on = isServiceEnabled();
+        boolean enabled = isServiceEnabled();
+        boolean paused = AppSettings.paused(this);
+        boolean on = enabled && !paused;
         status.setText(on
                 ? "✓ Activada: el límite está funcionando"
-                : "✗ Desactivada: seguí los pasos de abajo para activarla");
+                : enabled
+                    ? "⏸ Desactivada: Limit no está haciendo nada"
+                    : "✗ Desactivada en Accesibilidad: seguí los pasos de abajo para activarla");
         status.setBackgroundColor(getColor(on ? R.color.ok : R.color.warn));
         ((android.widget.Button) findViewById(R.id.btn_toggle)).setText(on
                 ? "Desactivar Limit"
-                : "Activar Limit (en Accesibilidad)");
+                : enabled ? "Activar Limit" : "Activar Limit (en Accesibilidad)");
 
         show(Kind.REELS, "Reels y lupa de Instagram", reelsText, reelsBar);
         show(Kind.FOR_YOU, "Para ti de X", xText, xBar);

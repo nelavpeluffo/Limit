@@ -156,6 +156,7 @@ public class LimitService extends AccessibilityService {
     @Override
     protected void onServiceConnected() {
         instance = this;
+        paused = AppSettings.paused(this);
         usage = new Usage(this);
         overlay = new Overlay(this);
         blocker = new Blocker(this, R.drawable.ic_lock,
@@ -173,7 +174,7 @@ public class LimitService extends AccessibilityService {
 
     @Override
     public void onAccessibilityEvent(AccessibilityEvent e) {
-        if (usage == null || e == null) return;
+        if (usage == null || e == null || paused) return;   // en pausa: no se mira nada
         CharSequence pkg = e.getPackageName();
         if (e.getEventType() == AccessibilityEvent.TYPE_WINDOWS_CHANGED) {
             // Se abrió o se cerró una ventana (por ejemplo, el teclado o un menú).
@@ -434,25 +435,31 @@ public class LimitService extends AccessibilityService {
     /** El servicio funcionando ahora (para el botón "Desactivar" de la app), o null. */
     static volatile LimitService instance;
 
-    /** Apaga Limit desde la app: saca todo lo que haya en pantalla y se desactiva. */
-    void turnOff() {
+    /** Pausa (o reanuda) Limit desde la app: en pausa no mira nada ni pone nada en pantalla. */
+    void setPaused(boolean on) {
+        paused = on;
+        if (!on) return;
         try {
             blocker.hide();
             searchBlocker.hide();
             backCatcher.hide();
             profileReelsCatcher.hide();
             dmCatcher.hide();
+            dmPlayerStable = false;
+            dmNavBusy = false;
             lockNotice.hide();
+            centerNotice.hide();
             cover.hide();
             cover.disarm();
             cancelNotice();
             overlay.hide();
             setKeyboardHidden(false);
+            stopTicking();
         } catch (Exception ignored) {
         }
-        instance = null;
-        disableSelf();
     }
+
+    private volatile boolean paused;
 
     // ---------------------------------------------------------------- reloj
 
@@ -474,7 +481,7 @@ public class LimitService extends AccessibilityService {
     }
 
     private void tick() {
-        if (!ticking) return;
+        if (!ticking || paused) return;
         long now = SystemClock.elapsedRealtime();
         Kind k = detect();
 
@@ -902,7 +909,7 @@ public class LimitService extends AccessibilityService {
     /** Botón "atrás" del teléfono (o el gesto de atrás). */
     @Override
     protected boolean onKeyEvent(android.view.KeyEvent event) {
-        if (event.getKeyCode() != android.view.KeyEvent.KEYCODE_BACK) return false;
+        if (paused || event.getKeyCode() != android.view.KeyEvent.KEYCODE_BACK) return false;
         if (event.getAction() == android.view.KeyEvent.ACTION_UP && holdingBack) {
             // Se retuvo el "atrás": se ejecuta recién cuando el reloj ya tapa la pantalla.
             holdingBack = false;
