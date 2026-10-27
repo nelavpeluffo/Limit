@@ -61,6 +61,8 @@ final class Cover {
         });
     }
     void fadeOut(long ms) { ui.post(() -> fadeOutImpl(ms)); }
+    /** Se va girando como la cara de un cubo hacia la izquierda (como las historias de Instagram). */
+    void cubeOut(long ms) { ui.post(() -> cubeOutImpl(ms)); }
     void hide() { ui.post(this::hideImpl); }
 
     private boolean attached;   // ventana puesta (visible o transparente)
@@ -86,6 +88,7 @@ final class Cover {
      * cuando ya tapa la pantalla por completo.
      */
     private void showImpl(Runnable onShown, long fadeInMs) {
+        resetTransform();
         if (shown && view.getAlpha() < 1f) {
             // Se estaba yendo con el fundido: vuelve a aparecer entero.
             view.animate().cancel();
@@ -142,8 +145,34 @@ final class Cover {
                 .start();
     }
 
+    private void cubeOutImpl(long ms) {
+        if (!shown) return;
+        float d = service.getResources().getDisplayMetrics().density;
+        float w = view.getWidth() > 0 ? view.getWidth() : service.getResources().getDisplayMetrics().widthPixels;
+        view.animate().cancel();
+        view.setCameraDistance(8000 * d);
+        view.setPivotX(w);                       // gira sobre su borde derecho…
+        view.setPivotY(view.getHeight() / 2f);
+        view.animate()
+                .translationX(-w)                // …mientras se corre hacia la izquierda
+                .rotationY(-90f)
+                .setDuration(ms)
+                .setInterpolator(new android.view.animation.AccelerateDecelerateInterpolator())
+                .withEndAction(() -> { if (shown) hideImpl(); })
+                .start();
+    }
+
+    /** Vuelve a dejar la pantalla derecha, para la próxima vez que aparezca. */
+    private void resetTransform() {
+        if (view == null) return;
+        if (view.getRotationY() != 0f || view.getTranslationX() != 0f) view.animate().cancel();
+        view.setTranslationX(0f);
+        view.setRotationY(0f);
+    }
+
     private void hideImpl() {
         if (view != null) view.animate().cancel();
+        resetTransform();
         if (anim != null) {
             anim.cancel();
             anim = null;

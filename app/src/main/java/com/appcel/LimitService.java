@@ -1546,7 +1546,6 @@ public class LimitService extends AccessibilityService {
                 storyAdActive = true;
                 storyAdSwipes = 0;
                 note("Instagram: publicidad en las historias → la salteo");
-                cover.show(null, 0, Cover.DARK);
                 skipStoryAd();   // sin esperar al reloj: el reloj no recibe toques, el deslizamiento pasa
             } else if (!ad && storyAdActive && storyAdSwipes > 0) {
                 endStoryAd();
@@ -1577,6 +1576,7 @@ public class LimitService extends AccessibilityService {
         } catch (Exception ignored) {
         }
         if (screen.isEmpty()) screen.set(0, 0, 1080, 2400);
+        cover.show(null, 0, Cover.DARK);   // (por si es otra publicidad seguida)
         float y = screen.exactCenterY();
         Path path = new Path();
         path.moveTo(screen.width() * 0.85f, y);
@@ -1584,6 +1584,8 @@ public class LimitService extends AccessibilityService {
         dispatchGesture(new GestureDescription.Builder()
                 .addStroke(new GestureDescription.StrokeDescription(path, 0, 110)).build(), null, null);
         storyAdSwipes++;
+        // La pantalla del reloj acompaña el giro de Instagram: se va como la cara de un cubo.
+        handler.postDelayed(() -> cover.cubeOut(320), 60);
         handler.removeCallbacks(storyAdFollowUpRunnable);
         handler.postDelayed(storyAdFollowUpRunnable, 450);
     }
@@ -1611,7 +1613,8 @@ public class LimitService extends AccessibilityService {
         if (!storyAdActive) return;
         storyAdActive = false;
         handler.removeCallbacks(storyAdFollowUpRunnable);
-        cover.fadeOut(120);
+        // Si ya se deslizó, la pantalla se está yendo con el giro del cubo: no tocarla.
+        if (storyAdSwipes == 0) cover.fadeOut(120);
     }
 
     /**
