@@ -74,6 +74,8 @@ public class LimitService extends AccessibilityService {
     private int dmSkips;
     private long dmNavStartedAt;                    // cosas abiertas que no eran Reels ni publicaciones
     private int dmScrollSteps;
+    private int dmSearchDir;
+    private boolean dmScrollRetried;
     private int dmCurrentRow = -1;          // número de mensaje (orden en el chat) del que estás viendo
     private int dmRowOrient = 0;            // +1: los números crecen hacia abajo; -1: hacia arriba; 0: no se sabe               // páginas que se movió el chat buscando (para volver)
     private boolean dmOlderIsBackward = true;   // "hacia mensajes más viejos" = desplazar hacia atrás
@@ -1536,6 +1538,7 @@ public class LimitService extends AccessibilityService {
                 if (Rect.intersects(b, r)) {
                     dmCurrentRect.set(b);
                     dmCurrentRow = lastThreadRows.get(i);
+                    note("Instagram: tocaste el mensaje " + dmCurrentRow + " del chat");
                     dmCurNode = null;
                     dmNavOpenedAt = SystemClock.elapsedRealtime();
                     return;
@@ -1565,6 +1568,7 @@ public class LimitService extends AccessibilityService {
         if (best >= 0) {
             dmCurrentRect.set(lastThreadBubbles.get(best));
             dmCurrentRow = lastThreadRows.get(best);
+            note("Instagram: abriste uno del chat; supongo el " + dmCurrentRow + " (había " + lastThreadBubbles.size() + " a la vista)");
         }
     }
 
@@ -1577,6 +1581,8 @@ public class LimitService extends AccessibilityService {
     private void dmNavigate(int dir) {
         if (dmNavBusy) return;
         dmNavBusy = true;
+        dmScrollRetried = false;
+        dmSearchDir = dir;
         dmScrollSteps = 0;
         dmSkips = 0;
         dmCatcher.hide();
@@ -1781,10 +1787,25 @@ public class LimitService extends AccessibilityService {
      */
     private void dmEnd(int dir) {
         note("Instagram: no hay más Reels " + (dir < 0 ? "anteriores" : "siguientes") + " en el chat");
-        int action = (dir < 0) == dmOlderIsBackward
-                ? AccessibilityNodeInfo.ACTION_SCROLL_FORWARD : AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD;
-        int steps = dir < 0 ? dmScrollSteps : 40;
-        dmScrollBack(action, steps, 0);
+        // En los dos casos el chat se mueve hacia los mensajes más nuevos: hacia atrás, lo
+        // justo para volver a donde estaba; hacia adelante, hasta abajo de todo.
+        int steps = dir < 0 ? dmScrollSteps : 80;
+        dmScrollBack(newerAction(), steps, 0);
+    }
+
+    /** Desplazar el chat hacia los mensajes más nuevos (hacia abajo). */
+    private int newerAction() {
+        return dmOlderIsBackward ? AccessibilityNodeInfo.ACTION_SCROLL_FORWARD : AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD;
+    }
+
+    /** Algo salió mal: dejar el chat donde estaba antes de buscar, y sacar el reloj. */
+    private void dmAbort(String why) {
+        note("Instagram: " + why);
+        if (dmScrollSteps <= 0) { dmFinish(); return; }
+        int action = dmSearchDir < 0 ? newerAction()
+                : (newerAction() == AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
+                        ? AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD : AccessibilityNodeInfo.ACTION_SCROLL_FORWARD);
+        dmScrollBack(action, dmScrollSteps, 0);
     }
 
     private void dmScrollBack(int action, int steps, int done) {
@@ -1794,11 +1815,18 @@ public class LimitService extends AccessibilityService {
             AccessibilityNodeInfo list = root == null ? null : firstVisible(root, "message_list");
             if (done < steps && list != null && hasAction(list, action)) {
                 list.performAction(action);
-                handler.postDelayed(() -> dmScrollBack(action, steps, done + 1), 120);
+                handler.postDelayed(() -> dmScrollBack(action, steps, done + 1), 140);
+                return;
+            }
+            // Puede que el chat siga moviéndose: un último intento un poco después.
+            if (done < steps && list != null && done >= 0 && !dmScrollRetried) {
+                dmScrollRetried = true;
+                handler.postDelayed(() -> dmScrollBack(action, steps, done), 300);
                 return;
             }
         } catch (Exception ignored) {
         }
+        dmScrollRetried = false;
         handler.postDelayed(this::dmFinish, 120);
     }
 
@@ -1897,7 +1925,7 @@ public class LimitService extends AccessibilityService {
         } catch (Exception ignored) {
         }
         if (attempt < 110) handler.postDelayed(() -> dmWaitPlayer(target, dir, attempt + 1), 60);
-        else dmFinish();   // nunca más de ~7 s
+        else dmAbort("no se abrió el Reel; vuelvo a dejar el chat donde estaba");   // nunca más de ~7 s
     }
 
     private void dmFinish() {
