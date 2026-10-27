@@ -869,14 +869,17 @@ public class LimitService extends AccessibilityService {
 
     /** ¿Estás en el buscador de Instagram (no en la grilla de la lupa)? */
     private static boolean inSearchScreen(AccessibilityNodeInfo root) {
-        if (exploreGridVisible(root)) return false;
         // Un perfil abierto desde el buscador: el buscador sigue debajo, pero estás en el perfil
         // (su flecha de atrás tiene que volver a los resultados, no al Inicio).
         if (hasId(root, "profile_tab_layout") || hasId(root, "profile_tabs_container")) return false;
+        boolean field = false;
         List<AccessibilityNodeInfo> found = root.findAccessibilityNodeInfosByViewId(IG + ":id/action_bar_search_edit_text");
-        if (found == null) return false;
-        for (AccessibilityNodeInfo n : found) if (n != null && n.isVisibleToUser()) return true;
-        return false;
+        if (found != null) for (AccessibilityNodeInfo n : found) if (n != null && n.isVisibleToUser()) field = true;
+        if (!field) return false;
+        // El buscador tiene la flecha de atrás al lado del campo (la grilla de la lupa no).
+        // Así se reconoce aunque los resultados muestren publicaciones en forma de grilla.
+        if (visibleBounds(root, "action_bar_button_back") != null) return true;
+        return !exploreGridVisible(root);
     }
 
     /** Flecha de atrás (arriba a la izquierda) tocada en el buscador, con el límite cumplido. */
