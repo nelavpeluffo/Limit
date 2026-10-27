@@ -64,6 +64,8 @@ public class LimitService extends AccessibilityService {
     private long lastProfileNotice;
     private long profileGoneSince;
     private long lastProfileSwitch;
+    private long lastDmScrollBlock;
+    private long lastDmScrollNotice;
     private long lastReelsTabAction;   // última vez que se tocó/eligió la pestaña Reels de un perfil
     private boolean keyboardSeenInSearch;   // en este buscador ya estuvo el teclado abierto
     private boolean leaving;   // saliendo del buscador hacia el Inicio, con el reloj puesto
@@ -153,6 +155,17 @@ public class LimitService extends AccessibilityService {
                 // Durante la animación de cierre Instagram puede seguir figurando unos instantes.
                 handler.postDelayed(this::hideIfLeft, 150);
                 handler.postDelayed(this::hideIfLeft, 400);
+            }
+            return;
+        }
+        if (e.getEventType() == AccessibilityEvent.TYPE_VIEW_SCROLLED) {
+            // Los deslizamientos solo importan en un Reel abierto desde un mensaje.
+            if (IG.contentEquals(pkg) && "mensajes".equals(igSection)) {
+                try {
+                    AccessibilityNodeInfo r = getRootInActiveWindow();
+                    if (r != null && reelsPlayerFullScreen(r)) blockDmReelScroll(r);
+                } catch (Exception ignored) {
+                }
             }
             return;
         }
@@ -1286,15 +1299,67 @@ public class LimitService extends AccessibilityService {
                 igSection = grid ? "lupa" : "busqueda";
                 return grid;
             }
-            igSection = reelsTabSelected(root) ? "reels" : "otra";
+            if (reelsTabSelected(root)) igSection = "reels";
+            else if (directTabSelected(root)) igSection = "mensajes";
+            else igSection = "otra";
         }
         boolean tab = reelsTabSelected(root);
         boolean player = reelsPlayerFullScreen(root);
         if (!tab && !player) return false;
+        // Un Reel que te mandaron por mensaje: se puede ver (no cuenta ni te saca),
+        // pero no seguir deslizando a otros.
+        if (player && !tab && "mensajes".equals(igSection)) {
+            blockDmReelScroll(root);
+            return false;
+        }
         // Lo que abrís desde la lupa (fotos y carruseles incluidos) también cuenta.
         if (player && !tab && "lupa".equals(igSection)) return true;
         // En otros lados, los carruseles y fotos del reproductor no cuentan.
         return !currentItemIsStill(root);
+    }
+
+    private static boolean directTabSelected(AccessibilityNodeInfo root) {
+        List<AccessibilityNodeInfo> found = root.findAccessibilityNodeInfosByViewId(IG + ":id/direct_tab");
+        if (found == null) return false;
+        for (AccessibilityNodeInfo n : found) {
+            if (n != null && n.isVisibleToUser() && (n.isSelected() || isSelectedDown(n, 2))) return true;
+        }
+        return false;
+    }
+
+    /**
+     * Reel abierto desde un mensaje: si deslizaste a otro Reel (el reproductor ya se
+     * puede mover "hacia atrás"), se vuelve al que te mandaron. Si no se puede, se
+     * cierra el reproductor y volvés al chat.
+     */
+    private void blockDmReelScroll(AccessibilityNodeInfo root) {
+        long now = SystemClock.elapsedRealtime();
+        if (now - lastDmScrollBlock < 500) return;
+        List<AccessibilityNodeInfo> pagers = root.findAccessibilityNodeInfosByViewId(IG + ":id/clips_viewer_view_pager");
+        if (pagers == null) return;
+        for (AccessibilityNodeInfo pager : pagers) {
+            if (pager == null || !pager.isVisibleToUser()) continue;
+            if (!canScrollBack(pager)) return;   // estás en el Reel que te mandaron
+            lastDmScrollBlock = now;
+            note("Instagram: deslizaste desde un Reel de un mensaje → vuelve al Reel");
+            boolean back = pager.performAction(AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD);
+            if (!back) performGlobalAction(GLOBAL_ACTION_BACK);
+            if (now - lastDmScrollNotice > 4000) {
+                lastDmScrollNotice = now;
+                notice("Solo el Reel que te mandaron", Overlay.VIOLET);
+            }
+            return;
+        }
+    }
+
+    private static boolean canScrollBack(AccessibilityNodeInfo n) {
+        for (AccessibilityNodeInfo.AccessibilityAction a : n.getActionList()) {
+            int id = a.getId();
+            if (id == AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD
+                    || id == android.R.id.accessibilityActionScrollUp) return true;
+            if (android.os.Build.VERSION.SDK_INT >= 29 && id == android.R.id.accessibilityActionPageUp) return true;
+        }
+        return false;
     }
 
     /**
