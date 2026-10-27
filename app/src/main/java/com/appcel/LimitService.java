@@ -156,7 +156,8 @@ public class LimitService extends AccessibilityService {
     @Override
     protected void onServiceConnected() {
         instance = this;
-        paused = AppSettings.paused(this);
+        paused = false;
+        AppSettings.setPaused(this, false);   // la pausa desde la app ya no existe
         usage = new Usage(this);
         overlay = new Overlay(this);
         blocker = new Blocker(this, R.drawable.ic_lock,
