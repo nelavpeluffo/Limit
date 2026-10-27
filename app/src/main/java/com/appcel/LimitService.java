@@ -69,6 +69,7 @@ public class LimitService extends AccessibilityService {
     private final Rect dmCurrentRect = new Rect();   // dónde estaba en el chat el Reel que estás viendo
     private AccessibilityNodeInfo dmCurNode;
     private long dmNavOpenedAt;
+    private boolean dmOpenedByLimit;        // el próximo reproductor que aparezca lo abrió Limit (ya se sabe cuál es)
     private int dmPlayerSeen;               // veces seguidas que se vio abierto el Reel del chat
     private int dmSkips;
     private long dmNavStartedAt;                    // cosas abiertas que no eran Reels ni publicaciones
@@ -1546,7 +1547,11 @@ public class LimitService extends AccessibilityService {
 
     /** Abriste un Reel del chat vos: cuál fue (el único a la vista, o el más centrado). */
     private void onDmPlayerOpened() {
-        if (SystemClock.elapsedRealtime() - dmNavOpenedAt < 4000) return;   // lo abrió Limit (o se supo por el toque)
+        if (dmOpenedByLimit) {   // lo abrió Limit: ya se sabe cuál es
+            dmOpenedByLimit = false;
+            return;
+        }
+        if (SystemClock.elapsedRealtime() - dmNavOpenedAt < 3000) return;   // se supo por el toque en el chat
         dmCurNode = null;
         dmCurrentRect.setEmpty();
         dmCurrentRow = -1;
@@ -1804,7 +1809,7 @@ public class LimitService extends AccessibilityService {
         dmCurNode = target;
         dmCurrentRect.set(r);
         dmCurrentRow = rowOf(target);
-        dmNavOpenedAt = SystemClock.elapsedRealtime();
+        dmOpenedByLimit = true;
         // Se toca la imagen (no el texto de abajo, que en algunas publicaciones abre otra cosa).
         Rect tap = new Rect(r);
         List<AccessibilityNodeInfo> media = target.findAccessibilityNodeInfosByViewId(IG + ":id/media_container");
@@ -1841,8 +1846,10 @@ public class LimitService extends AccessibilityService {
                     dmPlayerSeen = 0;
                     // Sigue en el chat: el toque no llegó, se vuelve a tocar (como mucho dos veces).
                     if (thread && (attempt == 12 || attempt == 28)) tapAt(x, y);
-                    // Se abrió otra cosa (no es un Reel ni una publicación): volver y seguir buscando.
-                    if (!thread && attempt >= 14 && dmSkips < 3) {
+                    // Se abrió otra cosa (no es un Reel ni una publicación, ni el reproductor
+                    // cargando): después de 2,5 s, volver y seguir buscando.
+                    boolean loading = reelsPlayerFullScreen(root);
+                    if (!thread && !loading && attempt >= 40 && dmSkips < 3) {
                         dmSkips++;
                         note("Instagram: eso no era un Reel ni una publicación; sigo buscando");
                         performGlobalAction(GLOBAL_ACTION_BACK);
@@ -1853,14 +1860,18 @@ public class LimitService extends AccessibilityService {
             }
         } catch (Exception ignored) {
         }
-        if (attempt < 80) handler.postDelayed(() -> dmWaitPlayer(x, y, dir, attempt + 1), 60);
-        else dmFinish();   // nunca más de ~5 s
+        if (attempt < 110) handler.postDelayed(() -> dmWaitPlayer(x, y, dir, attempt + 1), 60);
+        else dmFinish();   // nunca más de ~7 s
     }
 
     private void dmFinish() {
         dmNavBusy = false;
-        dmNavOpenedAt = SystemClock.elapsedRealtime();
-        wasInDmPlayer = false;   // al reaparecer el reproductor, no adivinar: ya se sabe cuál es
+        wasInDmPlayer = false;
+        try {
+            AccessibilityNodeInfo r = getRootInActiveWindow();
+            if (r != null && threadVisible(r)) dmOpenedByLimit = false;   // terminó en el chat
+        } catch (Exception ignored) {
+        }
         cover.fadeOut(160);
     }
 
