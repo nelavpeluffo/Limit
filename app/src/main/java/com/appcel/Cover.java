@@ -21,7 +21,8 @@ import android.widget.FrameLayout;
 final class Cover {
     private final AccessibilityService service;
     private final WindowManager wm;
-    private FrameLayout view;
+    private FrameLayout view;     // ventana (transparente)
+    private FrameLayout panel;    // la pantalla del reloj: toda la pantalla o justo sobre una historia
     private ClockSpinner spinner;
     private ValueAnimator anim;
     private boolean shown;
@@ -62,7 +63,7 @@ final class Cover {
         final android.graphics.Rect a = area == null ? null : new android.graphics.Rect(area);
         ui.post(() -> {
             color = background;
-            if (view != null) view.setBackgroundColor(color);
+            if (panel != null) panel.setBackgroundColor(color);
             setArea(a);
             showImpl(onMain, fadeInMs);
         });
@@ -71,31 +72,28 @@ final class Cover {
     private WindowManager.LayoutParams lp;
     private final android.graphics.Rect area = new android.graphics.Rect();
 
-    /** Cambia el lugar de la ventana (vacío = toda la pantalla). */
+    /** Cambia el lugar de la pantalla del reloj (vacío = toda la pantalla). */
     private void setArea(android.graphics.Rect a) {
         android.graphics.Rect want = a == null ? new android.graphics.Rect() : a;
         if (want.equals(area)) return;
         area.set(want);
-        if (!attached || lp == null) return;
         applyArea();
-        try {
-            wm.updateViewLayout(view, lp);
-        } catch (Exception ignored) {
-        }
     }
 
+    /** La ventana ocupa siempre toda la pantalla; lo que cambia es dónde está la pantalla del reloj. */
     private void applyArea() {
+        if (panel == null) return;
+        FrameLayout.LayoutParams p;
         if (area.isEmpty()) {
-            lp.width = WindowManager.LayoutParams.MATCH_PARENT;
-            lp.height = WindowManager.LayoutParams.MATCH_PARENT;
-            lp.x = 0;
-            lp.y = 0;
+            p = new FrameLayout.LayoutParams(FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT);
         } else {
-            lp.width = area.width();
-            lp.height = area.height();
-            lp.x = area.left;
-            lp.y = area.top;
+            p = new FrameLayout.LayoutParams(area.width(), area.height());
+            p.leftMargin = area.left;
+            p.topMargin = area.top;
         }
+        panel.setLayoutParams(p);
+        // Sobre una historia: un poco transparente (70 %).
+        panel.setAlpha(area.isEmpty() ? 1f : 0.7f);
     }
     void fadeOut(long ms) { ui.post(() -> fadeOutImpl(ms)); }
     /** Se va girando como la cara de un cubo hacia la izquierda (como las historias de Instagram). */
@@ -183,14 +181,18 @@ final class Cover {
     }
 
     private void cubeOutImpl(long ms) {
-        if (!shown) return;
+        if (!shown || panel == null) return;
         float d = service.getResources().getDisplayMetrics().density;
-        float w = view.getWidth() > 0 ? view.getWidth() : service.getResources().getDisplayMetrics().widthPixels;
-        view.animate().cancel();
-        view.setCameraDistance(8000 * d);
-        view.setPivotX(w);                       // gira sobre su borde derecho…
-        view.setPivotY(view.getHeight() / 2f);
-        view.animate()
+        float w = panel.getWidth() > 0 ? panel.getWidth() : service.getResources().getDisplayMetrics().widthPixels;
+        panel.animate().cancel();
+        panel.setCameraDistance(8000 * d);
+        panel.setPivotX(w);                       // gira sobre su borde derecho…
+        panel.setPivotY(panel.getHeight() / 2f);
+        // Lo más "adelante" posible: apenas más grande que la historia, así sus bordes
+        // no asoman por los costados mientras gira.
+        panel.setScaleX(1.08f);
+        panel.setScaleY(1.08f);
+        panel.animate()
                 .translationX(-w)                // …mientras se corre hacia la izquierda
                 .rotationY(-90f)
                 .setDuration(ms)
@@ -203,10 +205,12 @@ final class Cover {
 
     /** Vuelve a dejar la pantalla derecha, para la próxima vez que aparezca. */
     private void resetTransform() {
-        if (view == null) return;
-        if (view.getRotationY() != 0f || view.getTranslationX() != 0f) view.animate().cancel();
-        view.setTranslationX(0f);
-        view.setRotationY(0f);
+        if (panel == null) return;
+        panel.animate().cancel();
+        panel.setTranslationX(0f);
+        panel.setRotationY(0f);
+        panel.setScaleX(1f);
+        panel.setScaleY(1f);
     }
 
     private void hideImpl() {
@@ -227,10 +231,15 @@ final class Cover {
         float d = service.getResources().getDisplayMetrics().density;
         if (view == null) {
             view = new FrameLayout(service);
+            view.setClipChildren(false);
+            panel = new FrameLayout(service);
             spinner = new ClockSpinner(service, d);
             int size = (int) (72 * d);
-            view.addView(spinner, new FrameLayout.LayoutParams(size, size, Gravity.CENTER));
-            view.setBackgroundColor(color);
+            panel.addView(spinner, new FrameLayout.LayoutParams(size, size, Gravity.CENTER));
+            panel.setBackgroundColor(color);
+            view.addView(panel, new FrameLayout.LayoutParams(
+                    FrameLayout.LayoutParams.MATCH_PARENT, FrameLayout.LayoutParams.MATCH_PARENT));
+            applyArea();
         }
         view.setAlpha(0f);
         lp = new WindowManager.LayoutParams(
@@ -247,7 +256,6 @@ final class Cover {
             lp.layoutInDisplayCutoutMode =
                     WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
         }
-        applyArea();
         try {
             wm.addView(view, lp);
             attached = true;

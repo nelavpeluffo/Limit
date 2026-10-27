@@ -1594,7 +1594,9 @@ public class LimitService extends AccessibilityService {
         dispatchGesture(new GestureDescription.Builder()
                 .addStroke(new GestureDescription.StrokeDescription(path, 0, ms)).build(), null, null);
         storyAdSwipes++;
-        cover.cubeOut(ms);
+        // Instagram tarda un instante en empezar a seguir el dedo: el giro arranca apenas
+        // después y dura un poco más, para no adelantarse y dejar ver la publicidad.
+        handler.postDelayed(() -> cover.cubeOut(ms + 40), 40);
         handler.removeCallbacks(storyAdFollowUpRunnable);
         handler.postDelayed(storyAdFollowUpRunnable, ms + 250);
     }
