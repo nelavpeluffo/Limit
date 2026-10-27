@@ -75,7 +75,10 @@ public class LimitService extends AccessibilityService {
     private int dmPlayerSeen;               // veces seguidas que se vio abierto el Reel del chat
     private int dmSkips;
     private long dmNavStartedAt;                    // cosas abiertas que no eran Reels ni publicaciones
-    private int dmScrollSteps;
+    private int dmNetOlder;                 // páginas que se movió el chat hacia lo más viejo (negativo: hacia lo nuevo)
+    private boolean dmOrientLearned;
+    private int dmApproachSteps;
+    private boolean dmApproachDone;
     private int dmSearchDir;
     private boolean dmScrollRetried;
     private int dmNoScrollWaits;            // esperas a que Instagram cargue mensajes más viejos
@@ -1675,7 +1678,10 @@ public class LimitService extends AccessibilityService {
         dmScrollRetried = false;
         dmNoScrollWaits = 0;
         dmSearchDir = dir;
-        dmScrollSteps = 0;
+        dmNetOlder = 0;
+        dmOrientLearned = false;
+        dmApproachSteps = 0;
+        dmApproachDone = false;
         dmSkips = 0;
         dmCatcher.hide();
         cover.show(() -> {
@@ -1773,6 +1779,20 @@ public class LimitService extends AccessibilityService {
                 note(sb.toString());
             }
             if (haveRows && dmRowOrient != 0) {
+                // El que estabas viendo no está a la vista y todos los que se ven están del lado
+                // buscado: puede haber otros más cerca en el medio. Primero acercarse a él.
+                boolean curVisible = false, allWanted = rows.length > 0;
+                for (int i = 0; i < rows.length; i++) {
+                    if (rows[i] == dmCurrentRow) curVisible = true;
+                    boolean above = (rows[i] - dmCurrentRow) * dmRowOrient < 0;
+                    if (above != (dir < 0)) allWanted = false;
+                }
+                if (!curVisible && allWanted && !dmApproachDone && dmApproachSteps < 40) {
+                    dmApproachSteps++;
+                    dmScrollToward(root, dir > 0, dir, scrolls, null, true);
+                    return;
+                }
+                dmApproachDone = true;
                 int best = -1;
                 for (int i = 0; i < rows.length; i++) {
                     if (rows[i] == dmCurrentRow || !receivedBubble(rects[i], scr0.width())) continue;
@@ -1841,40 +1861,55 @@ public class LimitService extends AccessibilityService {
 
     /** Mueve el chat una página hacia el lado buscado y vuelve a buscar. */
     private void dmScrollAndRetry(AccessibilityNodeInfo root, int dir, int scrolls, Rect cur) {
+        dmScrollToward(root, dir < 0, dir, scrolls, cur, false);
+    }
+
+    /**
+     * Mueve el chat una página hacia los mensajes más viejos (older) o más nuevos y vuelve
+     * a buscar. approaching: se está volviendo hacia el que estabas viendo, para no saltear
+     * los que hay en el medio.
+     */
+    private void dmScrollToward(AccessibilityNodeInfo root, boolean older, int dir, int scrolls, Rect cur, boolean approaching) {
         try {
             AccessibilityNodeInfo list = firstVisible(root, "message_list");
-            int action = (dir < 0) == dmOlderIsBackward
+            int action = older == dmOlderIsBackward
                     ? AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD : AccessibilityNodeInfo.ACTION_SCROLL_FORWARD;
-            if (scrolls < 40 && list != null && !hasAction(list, action) && dmNoScrollWaits < 6) {
+            if (approaching && (list == null || !hasAction(list, action))) {
+                dmApproachDone = true;   // no se puede acercar más: buscar con lo que hay
+                dmFindTarget(dir, scrolls + 1);
+                return;
+            }
+            if (scrolls < 60 && list != null && !hasAction(list, action) && dmNoScrollWaits < 6) {
                 // Arriba de todo Instagram carga los mensajes más viejos de a poco: mientras
                 // carga, el chat no se puede mover. Esperar un poco antes de decir que no hay más.
                 dmNoScrollWaits++;
                 handler.postDelayed(() -> {
                     try {
-                        dmScrollAndRetry(getRootInActiveWindow(), dir, scrolls, cur);
+                        dmScrollToward(getRootInActiveWindow(), older, dir, scrolls, cur, false);
                     } catch (Exception ex) {
                         dmAbort("error buscando");
                     }
                 }, 450);
                 return;
             }
-            if (scrolls >= 40 || list == null || !hasAction(list, action)) {
+            if (scrolls >= 60 || list == null || !hasAction(list, action)) {
                 dmEnd(dir);
                 return;
             }
             dmNoScrollWaits = 0;
             final Rect before = cur;
             list.performAction(action);
-            dmScrollSteps++;
+            dmNetOlder += older ? 1 : -1;
             handler.postDelayed(() -> {
                 // La primera vez se aprende hacia dónde se mueve el chat con cada acción.
-                if (before != null && dmScrollSteps == 1) {
+                if (before != null && !dmOrientLearned) {
+                    dmOrientLearned = true;
                     try {
                         if (dmCurNode != null && dmCurNode.refresh() && dmCurNode.isVisibleToUser()) {
                             Rect after = new Rect();
                             dmCurNode.getBoundsInScreen(after);
                             boolean movedDown = after.top > before.top;   // se ven mensajes de más arriba
-                            boolean wanted = dir < 0 ? movedDown : !movedDown;
+                            boolean wanted = older ? movedDown : !movedDown;
                             if (after.top != before.top && !wanted) dmOlderIsBackward = !dmOlderIsBackward;
                         }
                     } catch (Exception ignored) {
@@ -1883,7 +1918,7 @@ public class LimitService extends AccessibilityService {
                 dmFindTarget(dir, scrolls + 1);
             }, 200);
         } catch (Exception ex) {
-            dmFinish();
+            dmAbort("error buscando");
         }
     }
 
@@ -1895,8 +1930,18 @@ public class LimitService extends AccessibilityService {
         note("Instagram: no hay más Reels " + (dir < 0 ? "anteriores" : "siguientes") + " en el chat");
         // En los dos casos el chat se mueve hacia los mensajes más nuevos: hacia atrás, lo
         // justo para volver a donde estaba; hacia adelante, hasta abajo de todo.
-        int steps = dir < 0 ? dmScrollSteps : 80;
-        dmScrollBack(newerAction(), steps, 0);
+        if (dir > 0) {
+            dmScrollBack(newerAction(), 80, 0);   // abajo de todo, para responder
+            return;
+        }
+        // Volver a la altura del último que viste (lo que se movió el chat buscando).
+        if (dmNetOlder > 0) dmScrollBack(newerAction(), dmNetOlder, 0);
+        else if (dmNetOlder < 0) dmScrollBack(olderAction(), -dmNetOlder, 0);
+        else dmScrollBack(newerAction(), 0, 0);
+    }
+
+    private int olderAction() {
+        return dmOlderIsBackward ? AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD : AccessibilityNodeInfo.ACTION_SCROLL_FORWARD;
     }
 
     /** Desplazar el chat hacia los mensajes más nuevos (hacia abajo). */
@@ -1907,11 +1952,9 @@ public class LimitService extends AccessibilityService {
     /** Algo salió mal: dejar el chat donde estaba antes de buscar, y sacar el reloj. */
     private void dmAbort(String why) {
         note("Instagram: " + why);
-        if (dmScrollSteps <= 0) { dmFinish(); return; }
-        int action = dmSearchDir < 0 ? newerAction()
-                : (newerAction() == AccessibilityNodeInfo.ACTION_SCROLL_FORWARD
-                        ? AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD : AccessibilityNodeInfo.ACTION_SCROLL_FORWARD);
-        dmScrollBack(action, dmScrollSteps, 0);
+        if (dmNetOlder > 0) dmScrollBack(newerAction(), dmNetOlder, 0);
+        else if (dmNetOlder < 0) dmScrollBack(olderAction(), -dmNetOlder, 0);
+        else dmFinish();
     }
 
     private void dmScrollBack(int action, int steps, int done) {
