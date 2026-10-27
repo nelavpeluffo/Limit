@@ -1481,11 +1481,32 @@ public class LimitService extends AccessibilityService {
         return visibleBounds(root, "message_list") != null;
     }
 
+    /**
+     * Los Reels y publicaciones compartidos en el chat que se ven ahora (no las citas
+     * chiquitas de una respuesta ni los enlaces sin imagen).
+     */
     private static List<AccessibilityNodeInfo> threadBubbles(AccessibilityNodeInfo root) {
+        Rect screen = new Rect();
+        root.getBoundsInScreen(screen);
         List<AccessibilityNodeInfo> out = new ArrayList<>();
-        List<AccessibilityNodeInfo> found = root.findAccessibilityNodeInfosByViewId(IG + ":id/reel_share_item_view");
-        if (found != null) for (AccessibilityNodeInfo n : found) if (n != null && n.isVisibleToUser()) out.add(n);
+        for (String name : new String[]{"reel_share_item_view", "xma_bubble_container"}) {
+            List<AccessibilityNodeInfo> found = root.findAccessibilityNodeInfosByViewId(IG + ":id/" + name);
+            if (found == null) continue;
+            for (AccessibilityNodeInfo n : found) {
+                if (n == null || !n.isVisibleToUser()) continue;
+                Rect r = new Rect();
+                n.getBoundsInScreen(r);
+                if (r.width() < screen.width() * 0.35f) continue;   // cita chiquita de una respuesta
+                if (name.startsWith("xma") && !hasIdDown(n, "media_container", 0)) continue;   // enlace sin imagen
+                out.add(n);
+            }
+        }
         return out;
+    }
+
+    /** ¿Lo mandó la otra persona? (sus mensajes van a la izquierda; los tuyos, a la derecha) */
+    private static boolean receivedBubble(Rect r, int screenWidth) {
+        return r.left < screenWidth * 0.22f;
     }
 
     private void rememberThreadBubbles(AccessibilityNodeInfo root) {
@@ -1545,7 +1566,7 @@ public class LimitService extends AccessibilityService {
         dmCatcher.hide();
         cover.show(() -> {
             performGlobalAction(GLOBAL_ACTION_BACK);
-            handler.postDelayed(() -> dmWaitThread(dir, 0), 250);
+            handler.postDelayed(() -> dmWaitThread(dir, 0), 90);
         });
         // Por las dudas, nunca queda tapado más de 12 s.
         handler.postDelayed(() -> { if (dmNavBusy) dmFinish(); }, 12_000);
@@ -1561,7 +1582,7 @@ public class LimitService extends AccessibilityService {
             }
         } catch (Exception ignored) {
         }
-        if (attempt < 25) handler.postDelayed(() -> dmWaitThread(dir, attempt + 1), 100);
+        if (attempt < 50) handler.postDelayed(() -> dmWaitThread(dir, attempt + 1), 50);
         else dmFinish();
     }
 
@@ -1580,13 +1601,23 @@ public class LimitService extends AccessibilityService {
         }
         if (afterReturn && !dmCurrentRect.isEmpty()) {
             // Al volver, Instagram deja el chat donde estaba: el Reel está en el mismo lugar.
+            // El más parecido en lugar (por si el chat se movió un poco al volver).
+            AccessibilityNodeInfo best = null;
+            Rect bestRect = null;
+            int bestDist = Integer.MAX_VALUE;
             for (AccessibilityNodeInfo b : bubbles) {
                 Rect r = new Rect();
                 b.getBoundsInScreen(r);
-                if (Math.abs(r.top - dmCurrentRect.top) < 60 && Math.abs(r.left - dmCurrentRect.left) < 60) {
-                    dmCurNode = b;
-                    return r;
+                int dist = Math.abs(r.centerY() - dmCurrentRect.centerY()) + Math.abs(r.left - dmCurrentRect.left);
+                if (dist < bestDist) {
+                    bestDist = dist;
+                    best = b;
+                    bestRect = r;
                 }
+            }
+            if (best != null && bestDist < 350) {
+                dmCurNode = best;
+                return bestRect;
             }
         }
         return null;
@@ -1607,9 +1638,12 @@ public class LimitService extends AccessibilityService {
             }
             AccessibilityNodeInfo target = null;
             float bestY = 0;
+            Rect scr = new Rect();
+            root.getBoundsInScreen(scr);
             for (AccessibilityNodeInfo b : bubbles) {
                 Rect r = new Rect();
                 b.getBoundsInScreen(r);
+                if (!receivedBubble(r, scr.width())) continue;   // los que mandaste vos no
                 float y = r.exactCenterY();
                 boolean ok;
                 if (cur != null) ok = dir < 0 ? y < cur.exactCenterY() - 20 : y > cur.exactCenterY() + 20;
@@ -1650,7 +1684,7 @@ public class LimitService extends AccessibilityService {
                     }
                 }
                 dmFindTarget(dir, scrolls + 1);
-            }, 320);
+            }, 200);
         } catch (Exception ex) {
             dmFinish();
         }
@@ -1675,12 +1709,12 @@ public class LimitService extends AccessibilityService {
             AccessibilityNodeInfo list = root == null ? null : firstVisible(root, "message_list");
             if (done < steps && list != null && hasAction(list, action)) {
                 list.performAction(action);
-                handler.postDelayed(() -> dmScrollBack(action, steps, done + 1), 200);
+                handler.postDelayed(() -> dmScrollBack(action, steps, done + 1), 120);
                 return;
             }
         } catch (Exception ignored) {
         }
-        handler.postDelayed(this::dmFinish, 200);
+        handler.postDelayed(this::dmFinish, 120);
     }
 
     /** Abre el Reel del chat tocándolo (con el reloj puesto encima, que no recibe toques). */
@@ -1691,21 +1725,22 @@ public class LimitService extends AccessibilityService {
         dmCurrentRect.set(r);
         dmNavOpenedAt = SystemClock.elapsedRealtime();
         tapAt(r.exactCenterX(), r.exactCenterY());
-        handler.postDelayed(() -> dmWaitPlayer(r, 0), 250);
+        handler.postDelayed(() -> dmWaitPlayer(r, 0), 80);
     }
 
     private void dmWaitPlayer(Rect r, int attempt) {
         if (!dmNavBusy) return;
         try {
             AccessibilityNodeInfo root = getRootInActiveWindow();
-            if (root != null && reelsPlayerFullScreen(root)) {
-                handler.postDelayed(this::dmFinish, 300);   // un instante para que arranque el video
+            if (root != null && !threadVisible(root)) {
+                // Ya se abrió (Reel o publicación): un instante para que se dibuje.
+                handler.postDelayed(this::dmFinish, 150);
                 return;
             }
-            if (attempt == 8 && root != null && threadVisible(root)) tapAt(r.exactCenterX(), r.exactCenterY());
+            if (attempt == 15 && root != null) tapAt(r.exactCenterX(), r.exactCenterY());
         } catch (Exception ignored) {
         }
-        if (attempt < 25) handler.postDelayed(() -> dmWaitPlayer(r, attempt + 1), 120);
+        if (attempt < 50) handler.postDelayed(() -> dmWaitPlayer(r, attempt + 1), 60);
         else dmFinish();
     }
 
@@ -1713,7 +1748,7 @@ public class LimitService extends AccessibilityService {
         dmNavBusy = false;
         dmNavOpenedAt = SystemClock.elapsedRealtime();
         wasInDmPlayer = false;   // al reaparecer el reproductor, no adivinar: ya se sabe cuál es
-        cover.fadeOut(220);
+        cover.fadeOut(160);
     }
 
     private void tapAt(float x, float y) {
