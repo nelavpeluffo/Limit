@@ -1472,8 +1472,8 @@ public class LimitService extends AccessibilityService {
     }
 
     /**
-     * Los Reels y publicaciones compartidos en el chat que se ven ahora (no las citas
-     * chiquitas de una respuesta ni los enlaces sin imagen).
+     * Los Reels y publicaciones (fotos y carruseles) compartidos en el chat que se ven
+     * ahora. No cuentan las citas chiquitas de una respuesta ni los enlaces a páginas.
      */
     private static List<AccessibilityNodeInfo> threadBubbles(AccessibilityNodeInfo root) {
         Rect screen = new Rect();
@@ -1487,7 +1487,9 @@ public class LimitService extends AccessibilityService {
                 Rect r = new Rect();
                 n.getBoundsInScreen(r);
                 if (r.width() < screen.width() * 0.35f) continue;   // cita chiquita de una respuesta
-                if (name.startsWith("xma") && !hasIdDown(n, "media_container", 0)) continue;   // enlace sin imagen
+                // Publicaciones de Instagram (foto o carrusel): llevan arriba la cabecera con
+                // la cuenta que la publicó. Los enlaces a páginas (con o sin imagen) no la tienen.
+                if (name.startsWith("xma") && !(hasIdDown(n, "header_container", 0) && hasIdDown(n, "media_container", 0))) continue;
                 out.add(n);
             }
         }
