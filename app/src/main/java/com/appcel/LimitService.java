@@ -1,7 +1,9 @@
 package com.appcel;
 
 import android.accessibilityservice.AccessibilityService;
+import android.accessibilityservice.GestureDescription;
 import android.content.Intent;
+import android.graphics.Path;
 import android.graphics.Rect;
 import android.os.Handler;
 import android.os.Looper;
@@ -59,7 +61,19 @@ public class LimitService extends AccessibilityService {
     private long lastBlockerUpdate;
     private boolean blockerUpdateQueued;
     private LockNotice lockNotice;
-    private EdgeGlow edgeGlow;   // contorno violeta: Reel de un mensaje con el límite cumplido
+    private EdgeGlow edgeGlow;
+    // Reels de un chat, uno atrás del otro
+    private SwipeCatcher dmCatcher;          // zona invisible sobre el video que reconoce el deslizamiento
+    private boolean dmNavBusy;               // pasando de un Reel del chat a otro (con el reloj puesto)
+    private boolean dmSuppressed;            // abriste comentarios, compartir…: la zona se aparta
+    private boolean wasInDmPlayer;
+    private final Rect dmCurrentRect = new Rect();   // dónde estaba en el chat el Reel que estás viendo
+    private AccessibilityNodeInfo dmCurNode;
+    private long dmNavOpenedAt;
+    private int dmScrollSteps;               // páginas que se movió el chat buscando (para volver)
+    private boolean dmOlderIsBackward = true;   // "hacia mensajes más viejos" = desplazar hacia atrás
+    private final List<Rect> lastThreadBubbles = new ArrayList<>();
+    private final Rect lastThreadList = new Rect();   // contorno violeta: Reel de un mensaje con el límite cumplido
     private boolean profileReelsNoticed;
     private long lastProfileSeen;
     private long lastProfileNotice;
@@ -132,6 +146,7 @@ public class LimitService extends AccessibilityService {
         cover = new Cover(this);
         lockNotice = new LockNotice(this);
         edgeGlow = new EdgeGlow(this);
+        dmCatcher = new SwipeCatcher(this, this::onDmSwipe);
         backCatcher = new Blocker(this, 0, this::onBackArrowTapped);
         profileReelsCatcher = new Blocker(this, 0, this::onProfileReelsCatcherTap);
         profileReelsCatcher.setRipple(true);   // al tocarla, una onda violeta: "tocaste, pero no hace nada"
@@ -183,7 +198,11 @@ public class LimitService extends AccessibilityService {
             return;
         }
         if (IG.contentEquals(pkg)) {
-            if (e.getEventType() == AccessibilityEvent.TYPE_VIEW_CLICKED) onInstagramClick(e);
+            if (e.getEventType() == AccessibilityEvent.TYPE_VIEW_CLICKED) {
+                onDmReelButton(e);
+                onThreadClick(e);
+                onInstagramClick(e);
+            }
             quickCheckExplore();
             checkKeyboardClosed();
         }
@@ -235,6 +254,7 @@ public class LimitService extends AccessibilityService {
         cover.disarm();
         lockNotice.hide();
         edgeGlow.hide();
+        dmCatcher.hide();
         profileReelsNoticed = false;
         if (leaving) { leaving = false; setKeyboardHidden(false); }
         xCovered = false;
@@ -505,6 +525,8 @@ public class LimitService extends AccessibilityService {
 
     /** Pone o saca la tapa con candado sobre el botón de Reels o de Para ti. */
     private void updateBlocker(AccessibilityNodeInfo root, String pkg) {
+        if (root != null && IG.equals(pkg)) updateDmReel(root);
+        else dmCatcher.hide();
         if (root != null && IG.equals(pkg) && usage.remaining(Kind.REELS) <= 0) {
             cover.arm();   // el reloj queda listo para tapar la grilla al instante
             // Con un Reel o la sección Reels abierta, la barra de abajo no está: sin candados.
@@ -1365,18 +1387,352 @@ public class LimitService extends AccessibilityService {
      */
     private void blockDmReelScroll(AccessibilityNodeInfo root) {
         long now = SystemClock.elapsedRealtime();
-        if (now - lastDmScrollBlock < 500) return;
+        if (dmNavBusy || now - lastDmScrollBlock < 500) return;
         List<AccessibilityNodeInfo> pagers = root.findAccessibilityNodeInfosByViewId(IG + ":id/clips_viewer_view_pager");
         if (pagers == null) return;
         for (AccessibilityNodeInfo pager : pagers) {
             if (pager == null || !pager.isVisibleToUser()) continue;
             if (!canScrollBack(pager)) return;   // estás en el Reel que te mandaron
             lastDmScrollBlock = now;
-            note("Instagram: deslizaste desde un Reel de un mensaje → vuelve al Reel");
-            boolean back = pager.performAction(AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD);
-            if (!back) performGlobalAction(GLOBAL_ACTION_BACK);
+            // Instagram pasó a un Reel recomendado: en vez de eso, el siguiente Reel del chat.
+            note("Instagram: deslizaste en un Reel de un mensaje (Instagram) → siguiente del chat");
+            dmNavigate(+1);
             return;
         }
+    }
+
+    // ------------------------------------------------- Reels del chat, uno atrás del otro
+
+    /** En cada cambio de Instagram: poner o sacar la zona que reconoce el deslizamiento. */
+    private void updateDmReel(AccessibilityNodeInfo root) {
+        if (dmNavBusy) {
+            dmCatcher.hide();
+            return;
+        }
+        boolean player = reelsPlayerFullScreen(root) && isDmReel(root);
+        if (!player) {
+            dmCatcher.hide();
+            dmSuppressed = false;
+            wasInDmPlayer = false;
+            if (threadVisible(root)) rememberThreadBubbles(root);
+            return;
+        }
+        if (!wasInDmPlayer) {
+            wasInDmPlayer = true;
+            onDmPlayerOpened();
+        }
+        if (dmSuppressed || keyboardVisible()) {
+            dmCatcher.hide();
+            return;
+        }
+        Rect area = dmSwipeArea(root);
+        if (area != null) dmCatcher.show(area);
+        else dmCatcher.hide();
+    }
+
+    /** Tocaste algo del Reel (comentarios, compartir…): la zona se aparta hasta salir del Reel. */
+    private void onDmReelButton(AccessibilityEvent e) {
+        if (!wasInDmPlayer) return;
+        try {
+            AccessibilityNodeInfo src = e.getSource();
+            String id = src == null ? null : src.getViewIdResourceName();
+            if (id == null) return;
+            String name = id.substring(id.indexOf('/') + 1);
+            if (name.startsWith("comment") || name.startsWith("direct_share") || name.startsWith("clips_ufi_more")
+                    || name.endsWith("_count") || name.startsWith("clips_author") || name.startsWith("sender_")) {
+                dmSuppressed = true;
+                dmCatcher.hide();
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    /** El video del Reel, sin la barra de arriba, los botones de la derecha ni el texto de abajo. */
+    private static Rect dmSwipeArea(AccessibilityNodeInfo root) {
+        Rect screen = new Rect();
+        root.getBoundsInScreen(screen);
+        int top = screen.top + (int) (screen.height() * 0.11f);
+        int bottom = screen.top + (int) (screen.height() * 0.78f);
+        int right = (int) (screen.width() * 0.86f);
+        Rect r = visibleBounds(root, "clips_viewer_action_bar");
+        if (r != null) top = r.bottom;
+        r = visibleBounds(root, "clips_media_info_component");
+        if (r != null && r.top > top) bottom = r.top;
+        r = visibleBounds(root, "clips_ufi_component");
+        if (r != null && r.left > screen.width() / 2) right = r.left;
+        if (bottom - top < 200 || right < 200) return null;
+        return new Rect(0, top, right, bottom);
+    }
+
+    private static Rect visibleBounds(AccessibilityNodeInfo root, String name) {
+        List<AccessibilityNodeInfo> found = root.findAccessibilityNodeInfosByViewId(IG + ":id/" + name);
+        if (found == null) return null;
+        for (AccessibilityNodeInfo n : found) {
+            if (n != null && n.isVisibleToUser()) {
+                Rect r = new Rect();
+                n.getBoundsInScreen(r);
+                return r;
+            }
+        }
+        return null;
+    }
+
+    private static boolean threadVisible(AccessibilityNodeInfo root) {
+        return visibleBounds(root, "message_list") != null;
+    }
+
+    private static List<AccessibilityNodeInfo> threadBubbles(AccessibilityNodeInfo root) {
+        List<AccessibilityNodeInfo> out = new ArrayList<>();
+        List<AccessibilityNodeInfo> found = root.findAccessibilityNodeInfosByViewId(IG + ":id/reel_share_item_view");
+        if (found != null) for (AccessibilityNodeInfo n : found) if (n != null && n.isVisibleToUser()) out.add(n);
+        return out;
+    }
+
+    private void rememberThreadBubbles(AccessibilityNodeInfo root) {
+        lastThreadBubbles.clear();
+        for (AccessibilityNodeInfo n : threadBubbles(root)) {
+            Rect r = new Rect();
+            n.getBoundsInScreen(r);
+            lastThreadBubbles.add(r);
+        }
+        Rect list = visibleBounds(root, "message_list");
+        if (list != null) lastThreadList.set(list);
+    }
+
+    /** Tocaste algo en el chat: si fue un Reel, ese es el que vas a ver. */
+    private void onThreadClick(AccessibilityEvent e) {
+        try {
+            AccessibilityNodeInfo src = e.getSource();
+            if (src == null) return;
+            Rect r = new Rect();
+            src.getBoundsInScreen(r);
+            for (Rect b : lastThreadBubbles) {
+                if (Rect.intersects(b, r)) {
+                    dmCurrentRect.set(b);
+                    dmCurNode = null;
+                    dmNavOpenedAt = SystemClock.elapsedRealtime();
+                    return;
+                }
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    /** Abriste un Reel del chat vos: cuál fue (el único a la vista, o el más centrado). */
+    private void onDmPlayerOpened() {
+        if (SystemClock.elapsedRealtime() - dmNavOpenedAt < 4000) return;   // lo abrió Limit (o se supo por el toque)
+        dmCurNode = null;
+        dmCurrentRect.setEmpty();
+        if (lastThreadBubbles.isEmpty()) return;
+        float mid = lastThreadList.isEmpty() ? 1200 : lastThreadList.exactCenterY();
+        Rect best = null;
+        for (Rect b : lastThreadBubbles) {
+            if (best == null || Math.abs(b.exactCenterY() - mid) < Math.abs(best.exactCenterY() - mid)) best = b;
+        }
+        if (best != null) dmCurrentRect.set(best);
+    }
+
+    private void onDmSwipe(int dir) {
+        note("Instagram: deslizaste " + (dir > 0 ? "hacia arriba" : "hacia abajo") + " en un Reel de un mensaje");
+        dmNavigate(dir);
+    }
+
+    /** Reloj violeta, volver al chat, buscar el Reel anterior (-1) o siguiente (+1) y abrirlo. */
+    private void dmNavigate(int dir) {
+        if (dmNavBusy) return;
+        dmNavBusy = true;
+        dmScrollSteps = 0;
+        dmCatcher.hide();
+        cover.show(() -> {
+            performGlobalAction(GLOBAL_ACTION_BACK);
+            handler.postDelayed(() -> dmWaitThread(dir, 0), 250);
+        });
+        // Por las dudas, nunca queda tapado más de 12 s.
+        handler.postDelayed(() -> { if (dmNavBusy) dmFinish(); }, 12_000);
+    }
+
+    private void dmWaitThread(int dir, int attempt) {
+        if (!dmNavBusy) return;
+        try {
+            AccessibilityNodeInfo root = getRootInActiveWindow();
+            if (root != null && threadVisible(root)) {
+                dmFindTarget(dir, 0);
+                return;
+            }
+        } catch (Exception ignored) {
+        }
+        if (attempt < 25) handler.postDelayed(() -> dmWaitThread(dir, attempt + 1), 100);
+        else dmFinish();
+    }
+
+    /** Dónde está ahora el Reel que estabas viendo (null si quedó fuera de la pantalla). */
+    private Rect dmCurrentNow(List<AccessibilityNodeInfo> bubbles, boolean afterReturn) {
+        if (dmCurNode != null) {
+            try {
+                if (dmCurNode.refresh() && dmCurNode.isVisibleToUser()) {
+                    Rect r = new Rect();
+                    dmCurNode.getBoundsInScreen(r);
+                    return r;
+                }
+            } catch (Exception ignored) {
+            }
+            if (!afterReturn) return null;
+        }
+        if (afterReturn && !dmCurrentRect.isEmpty()) {
+            // Al volver, Instagram deja el chat donde estaba: el Reel está en el mismo lugar.
+            for (AccessibilityNodeInfo b : bubbles) {
+                Rect r = new Rect();
+                b.getBoundsInScreen(r);
+                if (Math.abs(r.top - dmCurrentRect.top) < 60 && Math.abs(r.left - dmCurrentRect.left) < 60) {
+                    dmCurNode = b;
+                    return r;
+                }
+            }
+        }
+        return null;
+    }
+
+    private void dmFindTarget(int dir, int scrolls) {
+        if (!dmNavBusy) return;
+        try {
+            AccessibilityNodeInfo root = getRootInActiveWindow();
+            if (root == null || !threadVisible(root)) { dmFinish(); return; }
+            List<AccessibilityNodeInfo> bubbles = threadBubbles(root);
+            Rect cur = dmCurrentNow(bubbles, scrolls == 0);
+            if (cur == null && scrolls == 0) {
+                // No se sabe cuál Reel estabas viendo: quedarse en el chat.
+                note("Instagram: no reconocí qué Reel del chat estabas viendo");
+                dmFinish();
+                return;
+            }
+            AccessibilityNodeInfo target = null;
+            float bestY = 0;
+            for (AccessibilityNodeInfo b : bubbles) {
+                Rect r = new Rect();
+                b.getBoundsInScreen(r);
+                float y = r.exactCenterY();
+                boolean ok;
+                if (cur != null) ok = dir < 0 ? y < cur.exactCenterY() - 20 : y > cur.exactCenterY() + 20;
+                else ok = true;   // el actual quedó fuera de la pantalla: todos están del lado buscado
+                if (cur != null && Math.abs(r.top - cur.top) < 20 && Math.abs(r.left - cur.left) < 20) ok = false;
+                if (!ok) continue;
+                if (target == null || (dir < 0 ? y > bestY : y < bestY)) {
+                    target = b;
+                    bestY = y;
+                }
+            }
+            if (target != null) {
+                dmOpen(target);
+                return;
+            }
+            AccessibilityNodeInfo list = firstVisible(root, "message_list");
+            int action = (dir < 0) == dmOlderIsBackward
+                    ? AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD : AccessibilityNodeInfo.ACTION_SCROLL_FORWARD;
+            if (scrolls >= 25 || list == null || !hasAction(list, action)) {
+                dmEnd(dir);
+                return;
+            }
+            final Rect before = cur;
+            list.performAction(action);
+            dmScrollSteps++;
+            handler.postDelayed(() -> {
+                // La primera vez se aprende hacia dónde se mueve el chat con cada acción.
+                if (before != null && dmScrollSteps == 1) {
+                    try {
+                        if (dmCurNode != null && dmCurNode.refresh() && dmCurNode.isVisibleToUser()) {
+                            Rect after = new Rect();
+                            dmCurNode.getBoundsInScreen(after);
+                            boolean movedDown = after.top > before.top;   // se ven mensajes de más arriba
+                            boolean wanted = dir < 0 ? movedDown : !movedDown;
+                            if (after.top != before.top && !wanted) dmOlderIsBackward = !dmOlderIsBackward;
+                        }
+                    } catch (Exception ignored) {
+                    }
+                }
+                dmFindTarget(dir, scrolls + 1);
+            }, 320);
+        } catch (Exception ex) {
+            dmFinish();
+        }
+    }
+
+    /**
+     * No hay más Reels para ese lado. Hacia atrás (más viejos): el chat vuelve a la altura
+     * del último Reel que viste. Hacia adelante: el chat queda abajo de todo, para responder.
+     */
+    private void dmEnd(int dir) {
+        note("Instagram: no hay más Reels " + (dir < 0 ? "anteriores" : "siguientes") + " en el chat");
+        int action = (dir < 0) == dmOlderIsBackward
+                ? AccessibilityNodeInfo.ACTION_SCROLL_FORWARD : AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD;
+        int steps = dir < 0 ? dmScrollSteps : 40;
+        dmScrollBack(action, steps, 0);
+    }
+
+    private void dmScrollBack(int action, int steps, int done) {
+        if (!dmNavBusy) return;
+        try {
+            AccessibilityNodeInfo root = getRootInActiveWindow();
+            AccessibilityNodeInfo list = root == null ? null : firstVisible(root, "message_list");
+            if (done < steps && list != null && hasAction(list, action)) {
+                list.performAction(action);
+                handler.postDelayed(() -> dmScrollBack(action, steps, done + 1), 200);
+                return;
+            }
+        } catch (Exception ignored) {
+        }
+        handler.postDelayed(this::dmFinish, 200);
+    }
+
+    /** Abre el Reel del chat tocándolo (con el reloj puesto encima, que no recibe toques). */
+    private void dmOpen(AccessibilityNodeInfo target) {
+        Rect r = new Rect();
+        target.getBoundsInScreen(r);
+        dmCurNode = target;
+        dmCurrentRect.set(r);
+        dmNavOpenedAt = SystemClock.elapsedRealtime();
+        tapAt(r.exactCenterX(), r.exactCenterY());
+        handler.postDelayed(() -> dmWaitPlayer(r, 0), 250);
+    }
+
+    private void dmWaitPlayer(Rect r, int attempt) {
+        if (!dmNavBusy) return;
+        try {
+            AccessibilityNodeInfo root = getRootInActiveWindow();
+            if (root != null && reelsPlayerFullScreen(root)) {
+                handler.postDelayed(this::dmFinish, 300);   // un instante para que arranque el video
+                return;
+            }
+            if (attempt == 8 && root != null && threadVisible(root)) tapAt(r.exactCenterX(), r.exactCenterY());
+        } catch (Exception ignored) {
+        }
+        if (attempt < 25) handler.postDelayed(() -> dmWaitPlayer(r, attempt + 1), 120);
+        else dmFinish();
+    }
+
+    private void dmFinish() {
+        dmNavBusy = false;
+        dmNavOpenedAt = SystemClock.elapsedRealtime();
+        wasInDmPlayer = false;   // al reaparecer el reproductor, no adivinar: ya se sabe cuál es
+        cover.fadeOut(220);
+    }
+
+    private void tapAt(float x, float y) {
+        Path path = new Path();
+        path.moveTo(x, y);
+        dispatchGesture(new GestureDescription.Builder()
+                .addStroke(new GestureDescription.StrokeDescription(path, 0, 60)).build(), null, null);
+    }
+
+    private static AccessibilityNodeInfo firstVisible(AccessibilityNodeInfo root, String name) {
+        List<AccessibilityNodeInfo> found = root.findAccessibilityNodeInfosByViewId(IG + ":id/" + name);
+        if (found == null) return null;
+        for (AccessibilityNodeInfo n : found) if (n != null && n.isVisibleToUser()) return n;
+        return null;
+    }
+
+    private static boolean hasAction(AccessibilityNodeInfo n, int action) {
+        for (AccessibilityNodeInfo.AccessibilityAction a : n.getActionList()) if (a.getId() == action) return true;
+        return false;
     }
 
     private static boolean canScrollBack(AccessibilityNodeInfo n) {
