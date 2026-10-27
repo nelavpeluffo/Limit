@@ -1906,6 +1906,9 @@ public class LimitService extends AccessibilityService {
         try {
             AccessibilityNodeInfo r = getRootInActiveWindow();
             if (r != null && threadVisible(r)) dmOpenedByLimit = false;   // terminó en el chat
+            // La zona que reconoce el deslizamiento, puesta ya (antes de que se vaya el reloj):
+            // si deslizás enseguida, Instagram no llega a pasar a sus Reels recomendados.
+            if (r != null && r.getPackageName() != null && IG.contentEquals(r.getPackageName())) updateDmReel(r);
         } catch (Exception ignored) {
         }
         cover.fadeOut(160);
