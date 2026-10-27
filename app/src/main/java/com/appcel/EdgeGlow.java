@@ -3,11 +3,9 @@ package com.appcel;
 import android.accessibilityservice.AccessibilityService;
 import android.animation.ValueAnimator;
 import android.content.Context;
-import android.graphics.BlurMaskFilter;
 import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.PixelFormat;
-import android.graphics.RectF;
 import android.os.Build;
 import android.view.Gravity;
 import android.view.View;
@@ -15,9 +13,9 @@ import android.view.WindowManager;
 import android.view.animation.DecelerateInterpolator;
 
 /**
- * Contorno violeta con brillo alrededor de toda la pantalla: indica que estás viendo
- * algo en una situación especial (un Reel que te mandaron, con el límite ya cumplido).
- * Aparece expandiéndose desde el borde y después "respira" suave. No recibe toques.
+ * Brillo violeta arriba de la pantalla: indica que estás viendo algo en una situación
+ * especial (un Reel que te mandaron, con el límite ya cumplido). Aparece bajando desde
+ * el borde y después "respira" suave. No recibe toques.
  */
 final class EdgeGlow {
     private final AccessibilityService service;
@@ -34,10 +32,10 @@ final class EdgeGlow {
     void show() {
         if (shown) return;
         float d = service.getResources().getDisplayMetrics().density;
-        if (view == null) view = new GlowView(service, d, cornerRadius(d));
+        if (view == null) view = new GlowView(service);
         WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
                 WindowManager.LayoutParams.MATCH_PARENT,
-                WindowManager.LayoutParams.MATCH_PARENT,
+                (int) (220 * d),   // solo la parte de arriba de la pantalla
                 WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                         | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
@@ -95,41 +93,17 @@ final class EdgeGlow {
         shown = false;
     }
 
-    /** Lo redondeadas que son las esquinas de la pantalla (para seguir su forma). */
-    private float cornerRadius(float d) {
-        if (Build.VERSION.SDK_INT >= 31) {
-            try {
-                android.view.Display display = service.getSystemService(android.hardware.display.DisplayManager.class)
-                        .getDisplay(android.view.Display.DEFAULT_DISPLAY);
-                android.view.RoundedCorner rc = display.getRoundedCorner(android.view.RoundedCorner.POSITION_TOP_LEFT);
-                if (rc != null && rc.getRadius() > 0) return rc.getRadius();
-            } catch (Exception ignored) {
-            }
-        }
-        return 36 * d;
-    }
-
+    /**
+     * Brillo violeta difuso que baja desde el borde de arriba de la pantalla y se
+     * desvanece: sin líneas ni bordes marcados.
+     */
     private static final class GlowView extends View {
-        private final Paint wide = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Paint mid = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final Paint line = new Paint(Paint.ANTI_ALIAS_FLAG);
-        private final RectF rect = new RectF();
-        private final float d, corner;
+        private final Paint band = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint bloom = new Paint(Paint.ANTI_ALIAS_FLAG);
         private float level;
 
-        GlowView(Context c, float d, float corner) {
+        GlowView(Context c) {
             super(c);
-            this.d = d;
-            this.corner = corner;
-            setLayerType(LAYER_TYPE_SOFTWARE, null);   // el desenfoque necesita software
-            wide.setStyle(Paint.Style.STROKE);
-            wide.setColor(Overlay.VIOLET);
-            wide.setMaskFilter(new BlurMaskFilter(22 * d, BlurMaskFilter.Blur.NORMAL));
-            mid.setStyle(Paint.Style.STROKE);
-            mid.setColor(Overlay.VIOLET);
-            mid.setMaskFilter(new BlurMaskFilter(8 * d, BlurMaskFilter.Blur.NORMAL));
-            line.setStyle(Paint.Style.STROKE);
-            line.setColor(0xFFC9B5FF);
         }
 
         void setLevel(float l) {
@@ -140,20 +114,20 @@ final class EdgeGlow {
         @Override
         protected void onDraw(Canvas canvas) {
             if (level <= 0f) return;
-            float w = getWidth(), h = getHeight();
-            int a = (int) (255 * Math.min(1f, level));
-            // El brillo crece hacia adentro desde el borde de la pantalla.
-            wide.setStrokeWidth(28 * d * level);
-            wide.setAlpha((int) (a * 0.75f));
-            mid.setStrokeWidth(10 * d * level);
-            mid.setAlpha(a);
-            line.setStrokeWidth(2.5f * d);
-            line.setAlpha(a);
-            float inset = 1.5f * d;
-            rect.set(inset, inset, w - inset, h - inset);
-            canvas.drawRoundRect(rect, corner, corner, wide);
-            canvas.drawRoundRect(rect, corner, corner, mid);
-            canvas.drawRoundRect(rect, corner, corner, line);
+            float w = getWidth(), h = getHeight() * Math.max(0.05f, level);
+            int v = 0x9364FF;
+            // Franja suave de arriba hacia abajo.
+            band.setShader(new android.graphics.LinearGradient(0, 0, 0, h,
+                    new int[]{0x99000000 | v, 0x40000000 | v, 0x00000000 | v},
+                    new float[]{0f, 0.45f, 1f}, android.graphics.Shader.TileMode.CLAMP));
+            canvas.drawRect(0, 0, w, h, band);
+            // Un resplandor más intenso al centro, como una luz que entra desde arriba.
+            canvas.save();
+            canvas.scale(1f, h / (w * 0.5f), w / 2f, 0);
+            bloom.setShader(new android.graphics.RadialGradient(w / 2f, 0, w * 0.5f,
+                    new int[]{0x80000000 | v, 0x00000000 | v}, null, android.graphics.Shader.TileMode.CLAMP));
+            canvas.drawCircle(w / 2f, 0, w * 0.5f, bloom);
+            canvas.restore();
         }
     }
 }
