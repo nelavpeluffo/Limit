@@ -1528,10 +1528,10 @@ public class LimitService extends AccessibilityService {
      */
     private void checkStoryAd() {
         long now = SystemClock.elapsedRealtime();
-        if (now - lastStoryAdCheck < 120) {
+        if (now - lastStoryAdCheck < 60) {
             if (!storyAdCheckQueued) {
                 storyAdCheckQueued = true;
-                handler.postDelayed(() -> { storyAdCheckQueued = false; checkStoryAd(); }, 120);
+                handler.postDelayed(() -> { storyAdCheckQueued = false; checkStoryAd(); }, 60);
             }
             return;
         }
@@ -1546,7 +1546,8 @@ public class LimitService extends AccessibilityService {
                 storyAdActive = true;
                 storyAdSwipes = 0;
                 note("Instagram: publicidad en las historias → la salteo");
-                cover.show(this::skipStoryAd, 0, Cover.DARK);
+                cover.show(null, 0, Cover.DARK);
+                skipStoryAd();   // sin esperar al reloj: el reloj no recibe toques, el deslizamiento pasa
             } else if (!ad && storyAdActive && storyAdSwipes > 0) {
                 endStoryAd();
             }
@@ -1581,10 +1582,13 @@ public class LimitService extends AccessibilityService {
         path.moveTo(screen.width() * 0.85f, y);
         path.lineTo(screen.width() * 0.15f, y);
         dispatchGesture(new GestureDescription.Builder()
-                .addStroke(new GestureDescription.StrokeDescription(path, 0, 180)).build(), null, null);
+                .addStroke(new GestureDescription.StrokeDescription(path, 0, 110)).build(), null, null);
         storyAdSwipes++;
-        handler.postDelayed(this::storyAdFollowUp, 700);
+        handler.removeCallbacks(storyAdFollowUpRunnable);
+        handler.postDelayed(storyAdFollowUpRunnable, 450);
     }
+
+    private final Runnable storyAdFollowUpRunnable = this::storyAdFollowUp;
 
     private void storyAdFollowUp() {
         if (!storyAdActive) return;
@@ -1606,7 +1610,8 @@ public class LimitService extends AccessibilityService {
     private void endStoryAd() {
         if (!storyAdActive) return;
         storyAdActive = false;
-        cover.fadeOut(160);
+        handler.removeCallbacks(storyAdFollowUpRunnable);
+        cover.fadeOut(120);
     }
 
     /**
