@@ -232,6 +232,7 @@ public class LimitService extends AccessibilityService {
             startTicking();   // saliendo hacia el Inicio: no hace falta revisar nada más
             return;
         }
+        if (IG.contentEquals(pkg)) checkStoryAd();
         if (IG.contentEquals(pkg)) {
             if (e.getEventType() == AccessibilityEvent.TYPE_VIEW_CLICKED) {
                 dmPlayerStable = false;   // tocaste algo: revisar de nuevo enseguida
@@ -290,6 +291,7 @@ public class LimitService extends AccessibilityService {
         cover.disarm();
         lockNotice.hide();
         centerNotice.hide();
+        storyAdActive = false;
         dmCatcher.hide();
         dmPlayerStable = false;
         profileReelsNoticed = false;
@@ -1508,6 +1510,102 @@ public class LimitService extends AccessibilityService {
         } else {
             dmCatcher.hide();
         }
+    }
+
+    // --------------------------------------------- publicidad en las historias de Instagram
+
+    private boolean storyAdActive;      // hay una publicidad en pantalla y se está salteando
+    private int storyAdSwipes;
+    private long lastStoryAdCheck;
+    private boolean storyAdCheckQueued;
+    private boolean storyAdGaveUp;      // no se pudo saltear: no insistir hasta que se vaya
+
+    /**
+     * Historias: si la que se ve es una publicidad (Instagram le pone la etiqueta de
+     * "Publicidad" abajo y un botón de mensaje propio, que se reconocen por su nombre
+     * interno), se tapa con la pantalla oscura del reloj y se pasa a la historia siguiente.
+     */
+    private void checkStoryAd() {
+        long now = SystemClock.elapsedRealtime();
+        if (now - lastStoryAdCheck < 120) {
+            if (!storyAdCheckQueued) {
+                storyAdCheckQueued = true;
+                handler.postDelayed(() -> { storyAdCheckQueued = false; checkStoryAd(); }, 120);
+            }
+            return;
+        }
+        lastStoryAdCheck = now;
+        try {
+            AccessibilityNodeInfo root = getRootInActiveWindow();
+            CharSequence p = root == null ? null : root.getPackageName();
+            if (p == null || !IG.contentEquals(p)) return;
+            boolean ad = isStoryAd(root);
+            if (!ad) storyAdGaveUp = false;
+            if (ad && !storyAdActive && !storyAdGaveUp) {
+                storyAdActive = true;
+                storyAdSwipes = 0;
+                note("Instagram: publicidad en las historias → la salteo");
+                cover.show(this::skipStoryAd, 0, Cover.DARK);
+            } else if (!ad && storyAdActive && storyAdSwipes > 0) {
+                endStoryAd();
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
+    private static boolean isStoryAd(AccessibilityNodeInfo root) {
+        if (visibleBounds(root, "reel_viewer_root") == null) return false;
+        Rect screen = new Rect();
+        root.getBoundsInScreen(screen);
+        for (String name : new String[]{"reel_item_sponsored_label_footer_pill", "sponsored_message_composer_container"}) {
+            Rect r = visibleBounds(root, name);
+            // En la historia que se ve ahora (no en la de al lado, a mitad de un deslizamiento).
+            if (r != null && r.left < screen.width() * 0.6f && r.right > 0) return true;
+        }
+        return false;
+    }
+
+    /** Desliza hacia la izquierda: pasa a las historias de la cuenta siguiente. */
+    private void skipStoryAd() {
+        if (!storyAdActive) return;
+        Rect screen = new Rect();
+        try {
+            AccessibilityNodeInfo root = getRootInActiveWindow();
+            if (root != null) root.getBoundsInScreen(screen);
+        } catch (Exception ignored) {
+        }
+        if (screen.isEmpty()) screen.set(0, 0, 1080, 2400);
+        float y = screen.exactCenterY();
+        Path path = new Path();
+        path.moveTo(screen.width() * 0.85f, y);
+        path.lineTo(screen.width() * 0.15f, y);
+        dispatchGesture(new GestureDescription.Builder()
+                .addStroke(new GestureDescription.StrokeDescription(path, 0, 180)).build(), null, null);
+        storyAdSwipes++;
+        handler.postDelayed(this::storyAdFollowUp, 700);
+    }
+
+    private void storyAdFollowUp() {
+        if (!storyAdActive) return;
+        try {
+            AccessibilityNodeInfo root = getRootInActiveWindow();
+            if (root != null && isStoryAd(root) && storyAdSwipes < 4) {
+                skipStoryAd();   // otra publicidad (o no pasó): deslizar de nuevo
+                return;
+            }
+            if (root != null && isStoryAd(root)) {
+                storyAdGaveUp = true;
+                note("Instagram: no pude saltear la publicidad");
+            }
+        } catch (Exception ignored) {
+        }
+        endStoryAd();
+    }
+
+    private void endStoryAd() {
+        if (!storyAdActive) return;
+        storyAdActive = false;
+        cover.fadeOut(160);
     }
 
     /**
