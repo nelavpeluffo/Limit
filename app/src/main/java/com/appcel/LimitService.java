@@ -295,6 +295,7 @@ public class LimitService extends AccessibilityService {
         centerNotice.hide();
         storyAdActive = false;
         storyCatcher.hide();
+        muteAd(false);
         dmCatcher.hide();
         dmPlayerStable = false;
         profileReelsNoticed = false;
@@ -426,6 +427,7 @@ public class LimitService extends AccessibilityService {
     @Override
     public boolean onUnbind(Intent intent) {
         if (instance == this) instance = null;
+        muteAd(false);
         stopTicking();
         return super.onUnbind(intent);
     }
@@ -1560,6 +1562,7 @@ public class LimitService extends AccessibilityService {
                 Rect face = storyFace(root);
                 cover.show(null, 0, Cover.DARK, face, "Publicidad");
                 storyCatcher.show(face);
+                muteAd(true);
             } else if (!ad && storyAdActive) {
                 endStoryAd(true);
             }
@@ -1628,6 +1631,7 @@ public class LimitService extends AccessibilityService {
         storyCatcher.hide();   // que el deslizamiento de Limit le llegue a Instagram
         storyAdActive = false;
         storyAdLeaving = true;
+        handler.postDelayed(() -> muteAd(false), 250);   // el sonido vuelve con la historia siguiente
         float y = face.exactCenterY();
         Path path = new Path();
         path.moveTo(face.left + face.width() * 0.98f, y);
@@ -1640,7 +1644,27 @@ public class LimitService extends AccessibilityService {
         handler.postDelayed(() -> storyAdLeaving = false, ms + 150);
     }
 
+    private boolean adMuted;   // Limit silenció el sonido por una publicidad (y lo tiene que devolver)
+
+    /** Silencia (o devuelve) el sonido de los videos mientras hay una publicidad tapada. */
+    private void muteAd(boolean mute) {
+        try {
+            android.media.AudioManager am = (android.media.AudioManager) getSystemService(AUDIO_SERVICE);
+            if (am == null) return;
+            if (mute && !adMuted) {
+                if (am.isStreamMute(android.media.AudioManager.STREAM_MUSIC)) return;   // ya estaba en silencio
+                am.adjustStreamVolume(android.media.AudioManager.STREAM_MUSIC, android.media.AudioManager.ADJUST_MUTE, 0);
+                adMuted = true;
+            } else if (!mute && adMuted) {
+                am.adjustStreamVolume(android.media.AudioManager.STREAM_MUSIC, android.media.AudioManager.ADJUST_UNMUTE, 0);
+                adMuted = false;
+            }
+        } catch (Exception ignored) {
+        }
+    }
+
     private void endStoryAd(boolean fade) {
+        muteAd(false);
         storyAdActive = false;
         storyCatcher.hide();
         if (fade && !storyAdLeaving) cover.fadeOut(120);

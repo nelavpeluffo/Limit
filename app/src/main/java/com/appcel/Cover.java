@@ -112,8 +112,7 @@ final class Cover {
             p.topMargin = area.top;
         }
         panel.setLayoutParams(p);
-        // Sobre una historia: un poco transparente (70 %).
-        panel.setAlpha(area.isEmpty() ? 1f : 0.7f);
+        panel.setAlpha(1f);
     }
     void fadeOut(long ms) { ui.post(() -> fadeOutImpl(ms)); }
     /** Se va girando como la cara de un cubo hacia la izquierda (como las historias de Instagram). */
