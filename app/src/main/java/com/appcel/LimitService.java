@@ -76,6 +76,7 @@ public class LimitService extends AccessibilityService {
     private int dmScrollSteps;
     private int dmSearchDir;
     private boolean dmScrollRetried;
+    private int dmNoScrollWaits;            // esperas a que Instagram cargue mensajes más viejos
     private int dmCurrentRow = -1;          // número de mensaje (orden en el chat) del que estás viendo
     private int dmRowOrient = 0;            // +1: los números crecen hacia abajo; -1: hacia arriba; 0: no se sabe               // páginas que se movió el chat buscando (para volver)
     private boolean dmOlderIsBackward = true;   // "hacia mensajes más viejos" = desplazar hacia atrás
@@ -1601,6 +1602,7 @@ public class LimitService extends AccessibilityService {
         if (dmNavBusy) return;
         dmNavBusy = true;
         dmScrollRetried = false;
+        dmNoScrollWaits = 0;
         dmSearchDir = dir;
         dmScrollSteps = 0;
         dmSkips = 0;
@@ -1772,10 +1774,24 @@ public class LimitService extends AccessibilityService {
             AccessibilityNodeInfo list = firstVisible(root, "message_list");
             int action = (dir < 0) == dmOlderIsBackward
                     ? AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD : AccessibilityNodeInfo.ACTION_SCROLL_FORWARD;
-            if (scrolls >= 25 || list == null || !hasAction(list, action)) {
+            if (scrolls < 40 && list != null && !hasAction(list, action) && dmNoScrollWaits < 6) {
+                // Arriba de todo Instagram carga los mensajes más viejos de a poco: mientras
+                // carga, el chat no se puede mover. Esperar un poco antes de decir que no hay más.
+                dmNoScrollWaits++;
+                handler.postDelayed(() -> {
+                    try {
+                        dmScrollAndRetry(getRootInActiveWindow(), dir, scrolls, cur);
+                    } catch (Exception ex) {
+                        dmAbort("error buscando");
+                    }
+                }, 450);
+                return;
+            }
+            if (scrolls >= 40 || list == null || !hasAction(list, action)) {
                 dmEnd(dir);
                 return;
             }
+            dmNoScrollWaits = 0;
             final Rect before = cur;
             list.performAction(action);
             dmScrollSteps++;
