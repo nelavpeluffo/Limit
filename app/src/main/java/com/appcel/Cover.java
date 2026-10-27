@@ -53,12 +53,49 @@ final class Cover {
     void show(Runnable onShown, long fadeInMs) { show(onShown, fadeInMs, VIOLET); }
     /** onShown corre en el hilo principal, cuando el reloj ya tapa la pantalla. */
     void show(Runnable onShown, long fadeInMs, int background) {
+        show(onShown, fadeInMs, background, null);
+    }
+
+    /** area: dónde ponerse (null = toda la pantalla); por ejemplo, justo sobre una historia. */
+    void show(Runnable onShown, long fadeInMs, int background, android.graphics.Rect area) {
         Runnable onMain = onShown == null ? null : () -> main.post(onShown);
+        final android.graphics.Rect a = area == null ? null : new android.graphics.Rect(area);
         ui.post(() -> {
             color = background;
             if (view != null) view.setBackgroundColor(color);
+            setArea(a);
             showImpl(onMain, fadeInMs);
         });
+    }
+
+    private WindowManager.LayoutParams lp;
+    private final android.graphics.Rect area = new android.graphics.Rect();
+
+    /** Cambia el lugar de la ventana (vacío = toda la pantalla). */
+    private void setArea(android.graphics.Rect a) {
+        android.graphics.Rect want = a == null ? new android.graphics.Rect() : a;
+        if (want.equals(area)) return;
+        area.set(want);
+        if (!attached || lp == null) return;
+        applyArea();
+        try {
+            wm.updateViewLayout(view, lp);
+        } catch (Exception ignored) {
+        }
+    }
+
+    private void applyArea() {
+        if (area.isEmpty()) {
+            lp.width = WindowManager.LayoutParams.MATCH_PARENT;
+            lp.height = WindowManager.LayoutParams.MATCH_PARENT;
+            lp.x = 0;
+            lp.y = 0;
+        } else {
+            lp.width = area.width();
+            lp.height = area.height();
+            lp.x = area.left;
+            lp.y = area.top;
+        }
     }
     void fadeOut(long ms) { ui.post(() -> fadeOutImpl(ms)); }
     /** Se va girando como la cara de un cubo hacia la izquierda (como las historias de Instagram). */
@@ -157,7 +194,9 @@ final class Cover {
                 .translationX(-w)                // …mientras se corre hacia la izquierda
                 .rotationY(-90f)
                 .setDuration(ms)
-                .setInterpolator(new android.view.animation.AccelerateDecelerateInterpolator())
+                // Lineal: Limit desliza el dedo a velocidad pareja e Instagram gira
+                // la historia siguiendo al dedo, así los dos van juntos.
+                .setInterpolator(new android.view.animation.LinearInterpolator())
                 .withEndAction(() -> { if (shown) hideImpl(); })
                 .start();
     }
@@ -194,7 +233,7 @@ final class Cover {
             view.setBackgroundColor(color);
         }
         view.setAlpha(0f);
-        WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
+        lp = new WindowManager.LayoutParams(
                 WindowManager.LayoutParams.MATCH_PARENT,
                 WindowManager.LayoutParams.MATCH_PARENT,
                 WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
@@ -208,6 +247,7 @@ final class Cover {
             lp.layoutInDisplayCutoutMode =
                     WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
         }
+        applyArea();
         try {
             wm.addView(view, lp);
             attached = true;

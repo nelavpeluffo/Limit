@@ -1566,28 +1566,37 @@ public class LimitService extends AccessibilityService {
         return false;
     }
 
-    /** Desliza hacia la izquierda: pasa a las historias de la cuenta siguiente. */
+    /**
+     * Desliza hacia la izquierda a lo ancho de toda la historia: Instagram gira el cubo
+     * siguiendo al dedo, y la pantalla del reloj (del mismo tamaño y en el mismo lugar que
+     * la historia) gira igual y al mismo ritmo, como si fuera la cara de la publicidad.
+     */
     private void skipStoryAd() {
         if (!storyAdActive) return;
+        Rect face = null;
         Rect screen = new Rect();
         try {
             AccessibilityNodeInfo root = getRootInActiveWindow();
-            if (root != null) root.getBoundsInScreen(screen);
+            if (root != null) {
+                root.getBoundsInScreen(screen);
+                face = visibleBounds(root, "reel_viewer_root");
+            }
         } catch (Exception ignored) {
         }
         if (screen.isEmpty()) screen.set(0, 0, 1080, 2400);
-        cover.show(null, 0, Cover.DARK);   // (por si es otra publicidad seguida)
-        float y = screen.exactCenterY();
+        if (face == null || face.width() < screen.width() / 2) face = new Rect(screen);
+        cover.show(null, 0, Cover.DARK, face);
+        float y = face.exactCenterY();
         Path path = new Path();
-        path.moveTo(screen.width() * 0.85f, y);
-        path.lineTo(screen.width() * 0.15f, y);
+        path.moveTo(face.left + face.width() * 0.98f, y);
+        path.lineTo(face.left + face.width() * 0.02f, y);
+        final long ms = 300;
         dispatchGesture(new GestureDescription.Builder()
-                .addStroke(new GestureDescription.StrokeDescription(path, 0, 110)).build(), null, null);
+                .addStroke(new GestureDescription.StrokeDescription(path, 0, ms)).build(), null, null);
         storyAdSwipes++;
-        // La pantalla del reloj acompaña el giro de Instagram: se va como la cara de un cubo.
-        handler.postDelayed(() -> cover.cubeOut(320), 60);
+        cover.cubeOut(ms);
         handler.removeCallbacks(storyAdFollowUpRunnable);
-        handler.postDelayed(storyAdFollowUpRunnable, 450);
+        handler.postDelayed(storyAdFollowUpRunnable, ms + 250);
     }
 
     private final Runnable storyAdFollowUpRunnable = this::storyAdFollowUp;
