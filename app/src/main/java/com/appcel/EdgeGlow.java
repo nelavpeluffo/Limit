@@ -13,7 +13,7 @@ import android.view.WindowManager;
 import android.view.animation.DecelerateInterpolator;
 
 /**
- * Brillo violeta arriba de la pantalla: indica que estás viendo algo en una situación
+ * Brillo violeta arriba y abajo de la pantalla: indica que estás viendo algo en una situación
  * especial (un Reel que te mandaron, con el límite ya cumplido). Aparece bajando desde
  * el borde y después "respira" suave. No recibe toques.
  */
@@ -32,10 +32,10 @@ final class EdgeGlow {
     void show() {
         if (shown) return;
         float d = service.getResources().getDisplayMetrics().density;
-        if (view == null) view = new GlowView(service);
+        if (view == null) view = new GlowView(service, 220 * d);
         WindowManager.LayoutParams lp = new WindowManager.LayoutParams(
                 WindowManager.LayoutParams.MATCH_PARENT,
-                (int) (220 * d),   // solo la parte de arriba de la pantalla
+                WindowManager.LayoutParams.MATCH_PARENT,   // arriba y abajo de la pantalla
                 WindowManager.LayoutParams.TYPE_ACCESSIBILITY_OVERLAY,
                 WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE
                         | WindowManager.LayoutParams.FLAG_NOT_TOUCHABLE
@@ -94,16 +94,18 @@ final class EdgeGlow {
     }
 
     /**
-     * Brillo violeta difuso que baja desde el borde de arriba de la pantalla y se
-     * desvanece: sin líneas ni bordes marcados.
+     * Brillo violeta difuso que entra desde el borde de arriba y desde el de abajo de la
+     * pantalla y se desvanece hacia el centro: sin líneas ni bordes marcados.
      */
     private static final class GlowView extends View {
         private final Paint band = new Paint(Paint.ANTI_ALIAS_FLAG);
         private final Paint bloom = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final float bandHeight;
         private float level;
 
-        GlowView(Context c) {
+        GlowView(Context c, float bandHeight) {
             super(c);
+            this.bandHeight = bandHeight;
         }
 
         void setLevel(float l) {
@@ -114,18 +116,29 @@ final class EdgeGlow {
         @Override
         protected void onDraw(Canvas canvas) {
             if (level <= 0f) return;
-            float w = getWidth(), h = getHeight() * Math.max(0.05f, level);
+            float w = getWidth(), full = getHeight();
+            float h = bandHeight * Math.max(0.05f, level);
+            // Arriba…
+            drawGlow(canvas, w, h);
+            // …y lo mismo abajo, dado vuelta.
+            canvas.save();
+            canvas.scale(1f, -1f, w / 2f, full / 2f);
+            drawGlow(canvas, w, h);
+            canvas.restore();
+        }
+
+        /** Un brillo que baja desde y = 0 (15% más suave que la versión anterior). */
+        private void drawGlow(Canvas canvas, float w, float h) {
             int v = 0x9364FF;
-            // Franja suave de arriba hacia abajo.
             band.setShader(new android.graphics.LinearGradient(0, 0, 0, h,
-                    new int[]{0xCC000000 | v, 0x59000000 | v, 0x00000000 | v},
+                    new int[]{0xAD000000 | v, 0x4C000000 | v, 0x00000000 | v},
                     new float[]{0f, 0.45f, 1f}, android.graphics.Shader.TileMode.CLAMP));
             canvas.drawRect(0, 0, w, h, band);
-            // Un resplandor más intenso al centro, como una luz que entra desde arriba.
+            // Un resplandor más intenso al centro, como una luz que entra desde el borde.
             canvas.save();
             canvas.scale(1f, h / (w * 0.5f), w / 2f, 0);
             bloom.setShader(new android.graphics.RadialGradient(w / 2f, 0, w * 0.5f,
-                    new int[]{0xA6000000 | v, 0x00000000 | v}, null, android.graphics.Shader.TileMode.CLAMP));
+                    new int[]{0x8D000000 | v, 0x00000000 | v}, null, android.graphics.Shader.TileMode.CLAMP));
             canvas.drawCircle(w / 2f, 0, w * 0.5f, bloom);
             canvas.restore();
         }
