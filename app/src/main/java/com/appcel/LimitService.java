@@ -1528,24 +1528,43 @@ public class LimitService extends AccessibilityService {
 
     /** Tocaste algo en el chat: si fue un Reel, ese es el que vas a ver. */
     private void onThreadClick(AccessibilityEvent e) {
+        if (dmNavBusy) return;   // fue un toque de Limit
         try {
             AccessibilityNodeInfo src = e.getSource();
             if (src == null) return;
-            Rect r = new Rect();
-            src.getBoundsInScreen(r);
-            for (int i = 0; i < lastThreadBubbles.size(); i++) {
-                Rect b = lastThreadBubbles.get(i);
-                if (Rect.intersects(b, r)) {
-                    dmCurrentRect.set(b);
-                    dmCurrentRow = lastThreadRows.get(i);
-                    note("Instagram: tocaste el mensaje " + dmCurrentRow + " del chat");
-                    dmCurNode = null;
-                    dmNavOpenedAt = SystemClock.elapsedRealtime();
-                    return;
-                }
+            // ¿Tocaste un Reel o una publicación compartida? (el mensaje que lo contiene)
+            AccessibilityNodeInfo bubble = null;
+            AccessibilityNodeInfo cur = src;
+            for (int i = 0; cur != null && i < 8 && bubble == null; i++) {
+                String id = cur.getViewIdResourceName();
+                if (id != null && (id.endsWith(":id/reel_share_item_view") || id.endsWith(":id/xma_bubble_container"))) bubble = cur;
+                cur = cur.getParent();
             }
+            if (bubble == null) {
+                // A veces el toque lo informa el mensaje entero: buscar el Reel adentro.
+                List<AccessibilityNodeInfo> in = threadBubblesIn(src);
+                if (in.size() == 1) bubble = in.get(0);
+            }
+            if (bubble == null) return;
+            int row = rowOf(bubble);
+            Rect r = new Rect();
+            bubble.getBoundsInScreen(r);
+            dmCurrentRect.set(r);
+            dmCurrentRow = row;
+            dmCurNode = null;
+            dmNavOpenedAt = SystemClock.elapsedRealtime();
+            note("Instagram: tocaste el mensaje " + row + " del chat");
         } catch (Exception ignored) {
         }
+    }
+
+    private static List<AccessibilityNodeInfo> threadBubblesIn(AccessibilityNodeInfo n) {
+        List<AccessibilityNodeInfo> out = new ArrayList<>();
+        for (String name : new String[]{"reel_share_item_view", "xma_bubble_container"}) {
+            List<AccessibilityNodeInfo> found = n.findAccessibilityNodeInfosByViewId(IG + ":id/" + name);
+            if (found != null) for (AccessibilityNodeInfo f : found) if (f != null) out.add(f);
+        }
+        return out;
     }
 
     /** Abriste un Reel del chat vos: cuál fue (el único a la vista, o el más centrado). */
@@ -1878,11 +1897,29 @@ public class LimitService extends AccessibilityService {
                 handler.postDelayed(() -> dmSettleAndTap(target, dir, tap, tries + 1, askedShow), 110);
                 return;
             }
-            tapAt(tap.exactCenterX(), tap.exactCenterY());
+            dmPress(target, list, 0);
             handler.postDelayed(() -> dmWaitPlayer(target, dir, 0), 80);
         } catch (Exception ex) {
-            dmFinish();
+            dmAbort("error al abrir; vuelvo a dejar el chat donde estaba");
         }
+    }
+
+    /**
+     * Abre el mensaje: primero como lo haría el lector de pantalla (un "clic" sobre el
+     * mensaje, que no depende de dónde esté), y si no, tocando el centro de la imagen
+     * dentro de la parte visible del chat.
+     */
+    private void dmPress(AccessibilityNodeInfo target, Rect list, int attempt) {
+        if (attempt % 2 == 0) {
+            AccessibilityNodeInfo cur = target;
+            for (int i = 0; cur != null && i < 3; i++) {   // el mensaje compartido, no la fila entera
+                if (hasAction(cur, AccessibilityNodeInfo.ACTION_CLICK) && cur.performAction(AccessibilityNodeInfo.ACTION_CLICK)) return;
+                cur = cur.getParent();
+            }
+        }
+        Rect tap = dmTapRect(target);
+        if (list != null && !tap.intersect(list)) return;
+        tapAt(tap.exactCenterX(), tap.exactCenterY());
     }
 
     /**
@@ -1905,10 +1942,16 @@ public class LimitService extends AccessibilityService {
                 } else {
                     dmPlayerSeen = 0;
                     // Sigue en el chat: el toque no llegó, se vuelve a tocar (como mucho dos veces).
-                    if (thread && (attempt == 12 || attempt == 28)) {
+                    if (thread && (attempt == 12 || attempt == 24)) {
                         target.refresh();
-                        Rect tap = dmTapRect(target);
-                        tapAt(tap.exactCenterX(), tap.exactCenterY());
+                        dmPress(target, visibleBounds(root, "message_list"), attempt / 12);
+                    }
+                    // Tres intentos y no se abre (Reel borrado o no disponible): saltearlo.
+                    if (thread && attempt >= 40 && dmSkips < 4) {
+                        dmSkips++;
+                        note("Instagram: el mensaje " + dmCurrentRow + " no se abre; sigo con el próximo");
+                        dmFindTarget(dir, 0);
+                        return;
                     }
                     // Se abrió otra cosa (no es un Reel ni una publicación, ni el reproductor
                     // cargando): después de 2,5 s, volver y seguir buscando.
