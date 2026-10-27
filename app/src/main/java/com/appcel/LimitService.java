@@ -72,9 +72,12 @@ public class LimitService extends AccessibilityService {
     private int dmPlayerSeen;               // veces seguidas que se vio abierto el Reel del chat
     private int dmSkips;
     private long dmNavStartedAt;                    // cosas abiertas que no eran Reels ni publicaciones
-    private int dmScrollSteps;               // páginas que se movió el chat buscando (para volver)
+    private int dmScrollSteps;
+    private int dmCurrentRow = -1;          // número de mensaje (orden en el chat) del que estás viendo
+    private int dmRowOrient = 0;            // +1: los números crecen hacia abajo; -1: hacia arriba; 0: no se sabe               // páginas que se movió el chat buscando (para volver)
     private boolean dmOlderIsBackward = true;   // "hacia mensajes más viejos" = desplazar hacia atrás
     private final List<Rect> lastThreadBubbles = new ArrayList<>();
+    private final List<Integer> lastThreadRows = new ArrayList<>();
     private final Rect lastThreadList = new Rect();   // contorno violeta: Reel de un mensaje con el límite cumplido
     private boolean profileReelsNoticed;
     private long lastProfileSeen;
@@ -1440,21 +1443,24 @@ public class LimitService extends AccessibilityService {
         }
     }
 
-    /** El video del Reel, sin la barra de arriba, los botones de la derecha ni el texto de abajo. */
+    /**
+     * Toda la pantalla del Reel entre la barra de arriba y la barra para responder. Los
+     * toques (botones de la derecha, texto, pausar…) se le devuelven a Instagram; los
+     * deslizamientos hacia arriba o abajo los maneja Limit, así Instagram nunca pasa a
+     * sus Reels recomendados.
+     */
     private static Rect dmSwipeArea(AccessibilityNodeInfo root) {
         Rect screen = new Rect();
         root.getBoundsInScreen(screen);
         int top = screen.top + (int) (screen.height() * 0.11f);
-        int bottom = screen.top + (int) (screen.height() * 0.78f);
-        int right = (int) (screen.width() * 0.86f);
+        int bottom = screen.top + (int) (screen.height() * 0.90f);
         Rect r = visibleBounds(root, "clips_viewer_action_bar");
         if (r != null) top = r.bottom;
-        r = visibleBounds(root, "clips_media_info_component");
+        r = visibleBounds(root, "clips_footer_mask_container");
+        if (r == null) r = visibleBounds(root, "reel_viewer_message_composer");
         if (r != null && r.top > top) bottom = r.top;
-        r = visibleBounds(root, "clips_ufi_component");
-        if (r != null && r.left > screen.width() / 2) right = r.left;
-        if (bottom - top < 200 || right < 200) return null;
-        return new Rect(0, top, right, bottom);
+        if (bottom - top < 200) return null;
+        return new Rect(0, top, screen.width(), bottom);
     }
 
     private static Rect visibleBounds(AccessibilityNodeInfo root, String name) {
@@ -1506,10 +1512,12 @@ public class LimitService extends AccessibilityService {
 
     private void rememberThreadBubbles(AccessibilityNodeInfo root) {
         lastThreadBubbles.clear();
+        lastThreadRows.clear();
         for (AccessibilityNodeInfo n : threadBubbles(root)) {
             Rect r = new Rect();
             n.getBoundsInScreen(r);
             lastThreadBubbles.add(r);
+            lastThreadRows.add(rowOf(n));
         }
         Rect list = visibleBounds(root, "message_list");
         if (list != null) lastThreadList.set(list);
@@ -1522,9 +1530,11 @@ public class LimitService extends AccessibilityService {
             if (src == null) return;
             Rect r = new Rect();
             src.getBoundsInScreen(r);
-            for (Rect b : lastThreadBubbles) {
+            for (int i = 0; i < lastThreadBubbles.size(); i++) {
+                Rect b = lastThreadBubbles.get(i);
                 if (Rect.intersects(b, r)) {
                     dmCurrentRect.set(b);
+                    dmCurrentRow = lastThreadRows.get(i);
                     dmCurNode = null;
                     dmNavOpenedAt = SystemClock.elapsedRealtime();
                     return;
@@ -1539,13 +1549,18 @@ public class LimitService extends AccessibilityService {
         if (SystemClock.elapsedRealtime() - dmNavOpenedAt < 4000) return;   // lo abrió Limit (o se supo por el toque)
         dmCurNode = null;
         dmCurrentRect.setEmpty();
+        dmCurrentRow = -1;
         if (lastThreadBubbles.isEmpty()) return;
         float mid = lastThreadList.isEmpty() ? 1200 : lastThreadList.exactCenterY();
-        Rect best = null;
-        for (Rect b : lastThreadBubbles) {
-            if (best == null || Math.abs(b.exactCenterY() - mid) < Math.abs(best.exactCenterY() - mid)) best = b;
+        int best = -1;
+        for (int i = 0; i < lastThreadBubbles.size(); i++) {
+            Rect b = lastThreadBubbles.get(i);
+            if (best < 0 || Math.abs(b.exactCenterY() - mid) < Math.abs(lastThreadBubbles.get(best).exactCenterY() - mid)) best = i;
         }
-        if (best != null) dmCurrentRect.set(best);
+        if (best >= 0) {
+            dmCurrentRect.set(lastThreadBubbles.get(best));
+            dmCurrentRow = lastThreadRows.get(best);
+        }
     }
 
     private void onDmSwipe(int dir) {
@@ -1627,6 +1642,49 @@ public class LimitService extends AccessibilityService {
             AccessibilityNodeInfo root = getRootInActiveWindow();
             if (root == null || !threadVisible(root)) { dmFinish(); return; }
             List<AccessibilityNodeInfo> bubbles = threadBubbles(root);
+            Rect scr0 = new Rect();
+            root.getBoundsInScreen(scr0);
+            // Primero, por el número de mensaje dentro del chat (no cambia aunque el chat se mueva).
+            int[] rows = new int[bubbles.size()];
+            Rect[] rects = new Rect[bubbles.size()];
+            boolean haveRows = dmCurrentRow >= 0;
+            for (int i = 0; i < bubbles.size(); i++) {
+                rects[i] = new Rect();
+                bubbles.get(i).getBoundsInScreen(rects[i]);
+                rows[i] = rowOf(bubbles.get(i));
+                if (rows[i] < 0) haveRows = false;
+            }
+            if (haveRows) {
+                for (int i = 0; i < rows.length; i++) for (int j = i + 1; j < rows.length; j++) {
+                    if (rows[i] != rows[j] && rects[i].centerY() != rects[j].centerY()) {
+                        dmRowOrient = Integer.signum((rows[j] - rows[i]) * (rects[j].centerY() - rects[i].centerY()));
+                    }
+                }
+            }
+            if (scrolls == 0) {
+                StringBuilder sb = new StringBuilder("Instagram: buscando " + (dir < 0 ? "anterior" : "siguiente")
+                        + " · actual=" + dmCurrentRow + " orden=" + dmRowOrient + " a la vista=");
+                for (int i = 0; i < rows.length; i++) {
+                    sb.append(rows[i]).append(receivedBubble(rects[i], scr0.width()) ? "r" : "m").append(' ');
+                }
+                note(sb.toString());
+            }
+            if (haveRows && dmRowOrient != 0) {
+                int best = -1;
+                for (int i = 0; i < rows.length; i++) {
+                    if (rows[i] == dmCurrentRow || !receivedBubble(rects[i], scr0.width())) continue;
+                    boolean above = (rows[i] - dmCurrentRow) * dmRowOrient < 0;
+                    if (above != (dir < 0)) continue;
+                    if (best < 0 || Math.abs(rows[i] - dmCurrentRow) < Math.abs(rows[best] - dmCurrentRow)) best = i;
+                }
+                if (best >= 0) {
+                    dmOpen(bubbles.get(best), dir);
+                    return;
+                }
+                // Ninguno a la vista para ese lado: mover el chat y volver a buscar.
+                dmScrollAndRetry(root, dir, scrolls, null);
+                return;
+            }
             Rect cur = dmCurrentNow(bubbles, scrolls == 0);
             if (cur == null && scrolls == 0) {
                 // No se sabe cuál estabas viendo: se toma el que está más al centro del chat.
@@ -1672,6 +1730,15 @@ public class LimitService extends AccessibilityService {
                 dmOpen(target, dir);
                 return;
             }
+            dmScrollAndRetry(root, dir, scrolls, cur);
+        } catch (Exception ex) {
+            dmFinish();
+        }
+    }
+
+    /** Mueve el chat una página hacia el lado buscado y vuelve a buscar. */
+    private void dmScrollAndRetry(AccessibilityNodeInfo root, int dir, int scrolls, Rect cur) {
+        try {
             AccessibilityNodeInfo list = firstVisible(root, "message_list");
             int action = (dir < 0) == dmOlderIsBackward
                     ? AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD : AccessibilityNodeInfo.ACTION_SCROLL_FORWARD;
@@ -1736,6 +1803,7 @@ public class LimitService extends AccessibilityService {
         target.getBoundsInScreen(r);
         dmCurNode = target;
         dmCurrentRect.set(r);
+        dmCurrentRow = rowOf(target);
         dmNavOpenedAt = SystemClock.elapsedRealtime();
         // Se toca la imagen (no el texto de abajo, que en algunas publicaciones abre otra cosa).
         Rect tap = new Rect(r);
@@ -1808,6 +1876,17 @@ public class LimitService extends AccessibilityService {
         if (found == null) return null;
         for (AccessibilityNodeInfo n : found) if (n != null && n.isVisibleToUser()) return n;
         return null;
+    }
+
+    /** Número de mensaje dentro del chat (la lista lo informa a la accesibilidad), o -1. */
+    private static int rowOf(AccessibilityNodeInfo n) {
+        AccessibilityNodeInfo cur = n;
+        for (int i = 0; cur != null && i < 8; i++) {
+            AccessibilityNodeInfo.CollectionItemInfo info = cur.getCollectionItemInfo();
+            if (info != null) return info.getRowIndex();
+            cur = cur.getParent();
+        }
+        return -1;
     }
 
     private static boolean hasAction(AccessibilityNodeInfo n, int action) {
