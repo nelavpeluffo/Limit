@@ -35,6 +35,7 @@ final class Overlay {
     private WindowManager.LayoutParams lastLp;
 
     private final boolean bottom;   // abajo de la pantalla en vez de arriba
+    private boolean center;         // en el medio de la pantalla
     private int iconRes;            // ícono a la izquierda del texto (0 = sin ícono)
 
     Overlay(AccessibilityService service) {
@@ -45,6 +46,13 @@ final class Overlay {
         this.service = service;
         this.wm = (WindowManager) service.getSystemService(Context.WINDOW_SERVICE);
         this.bottom = bottom;
+    }
+
+    /** Pastillita en el medio de la pantalla (para avisos sobre lo que estás mirando). */
+    static Overlay centered(AccessibilityService service) {
+        Overlay o = new Overlay(service, false);
+        o.center = true;
+        return o;
     }
 
     /** Ícono a la izquierda del texto de la pastillita (0 para ninguno). */
@@ -172,7 +180,10 @@ final class Overlay {
                             | WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN
                             | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS,
                     PixelFormat.TRANSLUCENT);
-            if (bottom) {
+            if (center) {
+                lp.gravity = Gravity.CENTER;
+                lp.y = 0;
+            } else if (bottom) {
                 // Abajo, por encima de la barra de Instagram y de los botones del teléfono.
                 lp.gravity = Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL;
                 lp.y = (int) (110 * d) - (int) (GLOW_PAD_DP * d);

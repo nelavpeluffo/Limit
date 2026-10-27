@@ -61,6 +61,8 @@ public class LimitService extends AccessibilityService {
     private long lastBlockerUpdate;
     private boolean blockerUpdateQueued;
     private LockNotice lockNotice;
+    private Overlay centerNotice;           // aviso en el medio: Instagram no puede reproducir el video
+    private int dmOpenToken;                // cambia cada vez que se abre un Reel del chat
     // Reels de un chat, uno atrás del otro
     private SwipeCatcher dmCatcher;          // zona invisible sobre el video que reconoce el deslizamiento
     private boolean dmNavBusy;               // pasando de un Reel del chat a otro (con el reloj puesto)
@@ -161,6 +163,7 @@ public class LimitService extends AccessibilityService {
         searchBlocker = new Blocker(this, R.drawable.ic_search, this::openInstagramSearch);
         cover = new Cover(this);
         lockNotice = new LockNotice(this);
+        centerNotice = Overlay.centered(this);
         dmCatcher = new SwipeCatcher(this, this::onDmSwipe);
         backCatcher = new Blocker(this, 0, this::onBackArrowTapped);
         profileReelsCatcher = new Blocker(this, 0, this::onProfileReelsCatcherTap);
@@ -285,6 +288,7 @@ public class LimitService extends AccessibilityService {
         cover.hide();
         cover.disarm();
         lockNotice.hide();
+        centerNotice.hide();
         dmCatcher.hide();
         dmPlayerStable = false;
         profileReelsNoticed = false;
@@ -1469,6 +1473,7 @@ public class LimitService extends AccessibilityService {
         dmPlayerStable = false;
         if (!player) {
             dmCatcher.hide();
+            if (wasInDmPlayer) centerNotice.hide();
             dmSuppressed = false;
             wasInDmPlayer = false;
             if (threadVisible(root)) rememberThreadBubbles(root);
@@ -1477,6 +1482,9 @@ public class LimitService extends AccessibilityService {
         if (!wasInDmPlayer) {
             wasInDmPlayer = true;
             onDmPlayerOpened();
+            // A los 5 s, si es un video y no arrancó (Instagram no muestra la barra de avance), avisar.
+            final int token = ++dmOpenToken;
+            handler.postDelayed(() -> dmCheckPlaying(token), 5000);
         }
         if (dmSuppressed || keyboardVisible()) {
             dmCatcher.hide();
@@ -1491,6 +1499,27 @@ public class LimitService extends AccessibilityService {
             dmCatcher.hide();
         }
     }
+
+    /**
+     * El video del chat no arrancó: Instagram no lo pudo reproducir (le pasa con algunos
+     * Reels aunque Limit esté apagado). Se avisa en el medio de la pantalla, 4 s.
+     */
+    private void dmCheckPlaying(int token) {
+        if (token != dmOpenToken || dmNavBusy || !wasInDmPlayer) return;
+        try {
+            AccessibilityNodeInfo root = getRootInActiveWindow();
+            if (root == null || !(reelsPlayerFullScreen(root) && isDmReel(root))) return;
+            if (currentItemIsStill(root)) return;                 // foto o carrusel: no tiene barra
+            if (visibleBounds(root, "scrubber") != null) return;  // se está reproduciendo
+            note("Instagram: este video no arrancó (sin barra de avance)");
+            centerNotice.showGlowing("Instagram no puede reproducir este video", Overlay.VIOLET);
+            handler.removeCallbacks(hideCenterNotice);
+            handler.postDelayed(hideCenterNotice, 4000);
+        } catch (Exception ignored) {
+        }
+    }
+
+    private final Runnable hideCenterNotice = () -> centerNotice.hide();
 
     /** Tocaste algo del Reel (comentarios, compartir…): la zona se aparta hasta salir del Reel. */
     private void onDmReelButton(AccessibilityEvent e) {
@@ -1701,6 +1730,7 @@ public class LimitService extends AccessibilityService {
     private void dmNavigate(int dir) {
         if (dmNavBusy) return;
         dmNavBusy = true;
+        centerNotice.hide();
         dmScrollRetried = false;
         dmNoScrollWaits = 0;
         dmSearchDir = dir;
