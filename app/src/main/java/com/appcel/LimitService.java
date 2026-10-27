@@ -69,6 +69,9 @@ public class LimitService extends AccessibilityService {
     private final Rect dmCurrentRect = new Rect();   // dónde estaba en el chat el Reel que estás viendo
     private AccessibilityNodeInfo dmCurNode;
     private long dmNavOpenedAt;
+    private int dmPlayerSeen;               // veces seguidas que se vio abierto el Reel del chat
+    private int dmSkips;
+    private long dmNavStartedAt;                    // cosas abiertas que no eran Reels ni publicaciones
     private int dmScrollSteps;               // páginas que se movió el chat buscando (para volver)
     private boolean dmOlderIsBackward = true;   // "hacia mensajes más viejos" = desplazar hacia atrás
     private final List<Rect> lastThreadBubbles = new ArrayList<>();
@@ -1555,13 +1558,16 @@ public class LimitService extends AccessibilityService {
         if (dmNavBusy) return;
         dmNavBusy = true;
         dmScrollSteps = 0;
+        dmSkips = 0;
         dmCatcher.hide();
         cover.show(() -> {
             performGlobalAction(GLOBAL_ACTION_BACK);
             handler.postDelayed(() -> dmWaitThread(dir, 0), 90);
         });
-        // Por las dudas, nunca queda tapado más de 12 s.
-        handler.postDelayed(() -> { if (dmNavBusy) dmFinish(); }, 12_000);
+        // Por las dudas, nunca queda tapado más de 15 s.
+        final long startedAt = SystemClock.elapsedRealtime();
+        dmNavStartedAt = startedAt;
+        handler.postDelayed(() -> { if (dmNavBusy && dmNavStartedAt == startedAt) dmFinish(); }, 15_000);
     }
 
     private void dmWaitThread(int dir, int attempt) {
@@ -1663,7 +1669,7 @@ public class LimitService extends AccessibilityService {
                 }
             }
             if (target != null) {
-                dmOpen(target);
+                dmOpen(target, dir);
                 return;
             }
             AccessibilityNodeInfo list = firstVisible(root, "message_list");
@@ -1725,30 +1731,62 @@ public class LimitService extends AccessibilityService {
     }
 
     /** Abre el Reel del chat tocándolo (con el reloj puesto encima, que no recibe toques). */
-    private void dmOpen(AccessibilityNodeInfo target) {
+    private void dmOpen(AccessibilityNodeInfo target, int dir) {
         Rect r = new Rect();
         target.getBoundsInScreen(r);
         dmCurNode = target;
         dmCurrentRect.set(r);
         dmNavOpenedAt = SystemClock.elapsedRealtime();
-        tapAt(r.exactCenterX(), r.exactCenterY());
-        handler.postDelayed(() -> dmWaitPlayer(r, 0), 80);
+        // Se toca la imagen (no el texto de abajo, que en algunas publicaciones abre otra cosa).
+        Rect tap = new Rect(r);
+        List<AccessibilityNodeInfo> media = target.findAccessibilityNodeInfosByViewId(IG + ":id/media_container");
+        if (media != null) for (AccessibilityNodeInfo m : media) {
+            if (m != null && m.isVisibleToUser()) {
+                m.getBoundsInScreen(tap);
+                break;
+            }
+        }
+        float x = tap.exactCenterX(), y = tap.exactCenterY();
+        tapAt(x, y);
+        dmPlayerSeen = 0;
+        handler.postDelayed(() -> dmWaitPlayer(x, y, dir, 0), 80);
     }
 
-    private void dmWaitPlayer(Rect r, int attempt) {
+    /**
+     * El reloj queda hasta estar seguro de que se abrió el Reel o la publicación del
+     * chat (su reproductor, con la barra para responder), visto dos veces seguidas.
+     */
+    private void dmWaitPlayer(float x, float y, int dir, int attempt) {
         if (!dmNavBusy) return;
         try {
             AccessibilityNodeInfo root = getRootInActiveWindow();
-            if (root != null && !threadVisible(root)) {
-                // Ya se abrió (Reel o publicación): un instante para que se dibuje.
-                handler.postDelayed(this::dmFinish, 150);
-                return;
+            CharSequence pkg = root == null ? null : root.getPackageName();
+            if (pkg != null && IG.contentEquals(pkg)) {
+                boolean thread = threadVisible(root);
+                boolean player = !thread && reelsPlayerFullScreen(root) && isDmReel(root);
+                if (player) {
+                    if (++dmPlayerSeen >= 2) {
+                        handler.postDelayed(this::dmFinish, 200);   // un instante para que se dibuje
+                        return;
+                    }
+                } else {
+                    dmPlayerSeen = 0;
+                    // Sigue en el chat: el toque no llegó, se vuelve a tocar (como mucho dos veces).
+                    if (thread && (attempt == 12 || attempt == 28)) tapAt(x, y);
+                    // Se abrió otra cosa (no es un Reel ni una publicación): volver y seguir buscando.
+                    if (!thread && attempt >= 14 && dmSkips < 3) {
+                        dmSkips++;
+                        note("Instagram: eso no era un Reel ni una publicación; sigo buscando");
+                        performGlobalAction(GLOBAL_ACTION_BACK);
+                        handler.postDelayed(() -> dmWaitThread(dir, 0), 150);
+                        return;
+                    }
+                }
             }
-            if (attempt == 15 && root != null) tapAt(r.exactCenterX(), r.exactCenterY());
         } catch (Exception ignored) {
         }
-        if (attempt < 50) handler.postDelayed(() -> dmWaitPlayer(r, attempt + 1), 60);
-        else dmFinish();
+        if (attempt < 80) handler.postDelayed(() -> dmWaitPlayer(x, y, dir, attempt + 1), 60);
+        else dmFinish();   // nunca más de ~5 s
     }
 
     private void dmFinish() {
