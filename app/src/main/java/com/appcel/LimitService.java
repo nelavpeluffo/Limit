@@ -66,6 +66,8 @@ public class LimitService extends AccessibilityService {
     private boolean dmNavBusy;               // pasando de un Reel del chat a otro (con el reloj puesto)
     private boolean dmSuppressed;            // abriste comentarios, compartir…: la zona se aparta
     private boolean wasInDmPlayer;
+    private boolean dmPlayerStable;         // mirando un Reel del chat, con la zona ya puesta
+    private long lastDmCheck;
     private final Rect dmCurrentRect = new Rect();   // dónde estaba en el chat el Reel que estás viendo
     private AccessibilityNodeInfo dmCurNode;
     private long dmNavOpenedAt;
@@ -183,6 +185,22 @@ public class LimitService extends AccessibilityService {
             }
             return;
         }
+        if (dmPlayerStable && IG.contentEquals(pkg)
+                && (e.getEventType() == AccessibilityEvent.TYPE_WINDOW_CONTENT_CHANGED
+                    || e.getEventType() == AccessibilityEvent.TYPE_VIEW_SCROLLED)) {
+            // Mirando un Reel del chat: el video avisa cambios todo el tiempo (la barra de
+            // avance). Revisar la pantalla en cada aviso le quita tiempo a Instagram y el video
+            // se traba, así que mientras tanto se revisa como mucho cada 0,8 s.
+            long nowG = SystemClock.elapsedRealtime();
+            if (nowG - lastDmCheck < 800) return;
+            lastDmCheck = nowG;
+            try {
+                AccessibilityNodeInfo r = getRootInActiveWindow();
+                if (r != null) updateDmReel(r);
+            } catch (Exception ignored) {
+            }
+            if (dmPlayerStable) return;
+        }
         if (e.getEventType() == AccessibilityEvent.TYPE_VIEW_SCROLLED) {
             // Los deslizamientos solo importan en un Reel abierto desde un mensaje.
             long nowS = SystemClock.elapsedRealtime();
@@ -207,6 +225,7 @@ public class LimitService extends AccessibilityService {
         }
         if (IG.contentEquals(pkg)) {
             if (e.getEventType() == AccessibilityEvent.TYPE_VIEW_CLICKED) {
+                dmPlayerStable = false;   // tocaste algo: revisar de nuevo enseguida
                 onDmReelButton(e);
                 onThreadClick(e);
                 onInstagramClick(e);
@@ -262,6 +281,7 @@ public class LimitService extends AccessibilityService {
         cover.disarm();
         lockNotice.hide();
         dmCatcher.hide();
+        dmPlayerStable = false;
         profileReelsNoticed = false;
         if (leaving) { leaving = false; setKeyboardHidden(false); }
         xCovered = false;
@@ -1310,6 +1330,11 @@ public class LimitService extends AccessibilityService {
      * Se busca ese botón por su id o por su nombre "Reels"; no se mira nada más.
      */
     private boolean reelsVisible(AccessibilityNodeInfo root) {
+        // Mirando un Reel del chat (ya reconocido): no cuenta, y no hace falta revisar más.
+        if (dmPlayerStable) {
+            igSection = "mensajes";
+            return false;
+        }
         // En la pestaña Reels de un perfil no se te saca del perfil: se pasa a su grilla.
         List<AccessibilityNodeInfo> pTabs = profileTabs(root);
         if (pTabs != null) {
@@ -1407,9 +1432,11 @@ public class LimitService extends AccessibilityService {
     private void updateDmReel(AccessibilityNodeInfo root) {
         if (dmNavBusy) {
             dmCatcher.hide();
+            dmPlayerStable = false;
             return;
         }
         boolean player = reelsPlayerFullScreen(root) && isDmReel(root);
+        dmPlayerStable = false;
         if (!player) {
             dmCatcher.hide();
             dmSuppressed = false;
@@ -1426,8 +1453,13 @@ public class LimitService extends AccessibilityService {
             return;
         }
         Rect area = dmSwipeArea(root);
-        if (area != null) dmCatcher.show(area);
-        else dmCatcher.hide();
+        if (area != null) {
+            dmCatcher.show(area);
+            dmPlayerStable = true;
+            lastDmCheck = SystemClock.elapsedRealtime();
+        } else {
+            dmCatcher.hide();
+        }
     }
 
     /** Tocaste algo del Reel (comentarios, compartir…): la zona se aparta hasta salir del Reel. */
@@ -1593,6 +1625,17 @@ public class LimitService extends AccessibilityService {
     }
 
     private void onDmSwipe(int dir) {
+        try {
+            AccessibilityNodeInfo r = getRootInActiveWindow();
+            if (r == null || !(reelsPlayerFullScreen(r) && isDmReel(r))) {
+                // Ya no estás en el Reel (la zona quedó de más): sacarla.
+                dmCatcher.hide();
+                dmPlayerStable = false;
+                wasInDmPlayer = false;
+                return;
+            }
+        } catch (Exception ignored) {
+        }
         note("Instagram: deslizaste " + (dir > 0 ? "hacia arriba" : "hacia abajo") + " en un Reel de un mensaje");
         dmNavigate(dir);
     }
