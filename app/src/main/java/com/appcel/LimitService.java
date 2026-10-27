@@ -452,6 +452,9 @@ public class LimitService extends AccessibilityService {
                 }
             }
         } else {
+            // Ya no estás en Reels: la salida funcionó. Así, abrir varios Reels seguidos
+            // (por ejemplo, de mensajes) no se toma como que Limit no pudo sacarte.
+            enforceStreak = 0;
             if (now >= noticeUntil) overlay.hide();
             else lastActive = now;
             if (now - lastActive > IDLE_STOP_MS) {
