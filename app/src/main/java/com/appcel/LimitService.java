@@ -90,6 +90,7 @@ public class LimitService extends AccessibilityService {
     private final List<Rect> lastThreadBubbles = new ArrayList<>();
     private final List<Integer> lastThreadRows = new ArrayList<>();
     private final List<Boolean> lastThreadHidden = new ArrayList<>();
+    private long lastThreadRemember;
     private final Rect lastThreadList = new Rect();   // contorno violeta: Reel de un mensaje con el límite cumplido
     private boolean profileReelsNoticed;
     private long lastProfileSeen;
@@ -1490,7 +1491,13 @@ public class LimitService extends AccessibilityService {
             if (wasInDmPlayer) centerNotice.hide();
             dmSuppressed = false;
             wasInDmPlayer = false;
-            if (threadVisible(root)) rememberThreadBubbles(root);
+            if (threadVisible(root)) {
+                long nowT = SystemClock.elapsedRealtime();
+                if (nowT - lastThreadRemember > 250) {
+                    lastThreadRemember = nowT;
+                    rememberThreadBubbles(root);
+                }
+            }
             return;
         }
         if (!wasInDmPlayer) {
@@ -1669,7 +1676,70 @@ public class LimitService extends AccessibilityService {
                 out.add(n);
             }
         }
+        out.addAll(composeReelCards(root, screen));
         return out;
+    }
+
+    /**
+     * En algunas versiones de Instagram los mensajes del chat se dibujan de otra forma
+     * (Jetpack Compose) y los Reels compartidos no tienen nombre interno. Se reconocen por
+     * su forma: una tarjeta vertical (como un Reel) con el ícono de reproducir en el medio.
+     */
+    private static List<AccessibilityNodeInfo> composeReelCards(AccessibilityNodeInfo root, Rect screen) {
+        List<AccessibilityNodeInfo> out = new ArrayList<>();
+        AccessibilityNodeInfo list = firstVisible(root, "message_list");
+        if (list == null) return out;
+        Rect lr = new Rect();
+        list.getBoundsInScreen(lr);
+        int w = screen.width();
+        for (int i = 0; i < list.getChildCount(); i++) {
+            AccessibilityNodeInfo row = list.getChild(i);
+            if (row == null) continue;
+            CharSequence cls = row.getClassName();
+            if (cls == null || !cls.toString().contains("ComposeView")) continue;
+            // Buscar la tarjeta dentro del mensaje (pocos niveles).
+            ArrayDeque<AccessibilityNodeInfo> queue = new ArrayDeque<>();
+            ArrayDeque<Integer> depth = new ArrayDeque<>();
+            queue.add(row);
+            depth.add(0);
+            int seen = 0;
+            while (!queue.isEmpty() && seen < 30) {
+                AccessibilityNodeInfo n = queue.poll();
+                int dpt = depth.poll();
+                seen++;
+                if (n == null) continue;
+                Rect r = new Rect();
+                n.getBoundsInScreen(r);
+                float ratio = r.width() > 0 ? r.height() / (float) r.width() : 0;
+                if (r.width() >= w * 0.38f && r.width() <= w * 0.75f && ratio >= 1.55f && ratio <= 2.05f
+                        && Rect.intersects(r, lr) && hasPlayIcon(n, r, w)) {
+                    out.add(n);
+                    break;
+                }
+                if (dpt < 4) for (int k = 0; k < n.getChildCount(); k++) {
+                    queue.add(n.getChild(k));
+                    depth.add(dpt + 1);
+                }
+            }
+        }
+        return out;
+    }
+
+    /** ¿Tiene en el medio un cuadradito del tamaño del ícono de reproducir? */
+    private static boolean hasPlayIcon(AccessibilityNodeInfo card, Rect cr, int screenWidth) {
+        for (int i = 0; i < card.getChildCount() && i < 12; i++) {
+            AccessibilityNodeInfo c = card.getChild(i);
+            if (c == null) continue;
+            Rect r = new Rect();
+            c.getBoundsInScreen(r);
+            int side = Math.max(r.width(), r.height());
+            boolean square = r.width() > 0 && Math.abs(r.width() - r.height()) <= side * 0.15f;
+            boolean size = side >= screenWidth * 0.06f && side <= screenWidth * 0.13f;
+            boolean centered = Math.abs(r.centerX() - cr.centerX()) <= cr.width() * 0.15f
+                    && Math.abs(r.centerY() - cr.centerY()) <= cr.height() * 0.2f;
+            if (square && size && centered) return true;
+        }
+        return false;
     }
 
     /** ¿Lo mandó la otra persona? (sus mensajes van a la izquierda; los tuyos, a la derecha) */
