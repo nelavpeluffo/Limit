@@ -77,6 +77,7 @@ public class LimitService extends AccessibilityService {
     private Blocker searchBlocker;  // botón de la lupa (Instagram): abre el buscador
     private Cover cover;
     private Blocker tiktokLock1, tiktokLock2;   // candados sobre las pestañas de videos de TikTok
+    private Blocker shortsLock;                 // candado sobre la pestaña Shorts de YouTube
     private Blocker backCatcher;   // zona invisible sobre la flecha de atrás del buscador
     private Blocker profileReelsCatcher;   // zona invisible sobre la pestaña Reels de un perfil (y su flechita)
     private boolean holdingBack;
@@ -188,6 +189,8 @@ public class LimitService extends AccessibilityService {
                 () -> notice("Los videos de TikTok están bloqueados hasta mañana", Overlay.VIOLET));
         tiktokLock2 = new Blocker(this, R.drawable.ic_lock,
                 () -> notice("Los videos de TikTok están bloqueados hasta mañana", Overlay.VIOLET));
+        shortsLock = new Blocker(this, R.drawable.ic_lock,
+                () -> notice("Shorts está bloqueado hasta mañana", Overlay.VIOLET));
         blocker = new Blocker(this, R.drawable.ic_lock,
                 () -> notice("Reels está bloqueado hasta mañana", Overlay.VIOLET));
         searchBlocker = new Blocker(this, R.drawable.ic_search, this::openInstagramSearch);
@@ -320,6 +323,7 @@ public class LimitService extends AccessibilityService {
         cover.disarm();
         tiktokLock1.hide();
         tiktokLock2.hide();
+        shortsLock.hide();
         lockNotice.hide();
         centerNotice.hide();
         muteAd(false);
@@ -721,6 +725,24 @@ public class LimitService extends AccessibilityService {
         return result;
     }
 
+    /** El botón "Shorts" de la barra de abajo de YouTube (por su nombre), o null. */
+    private static AccessibilityNodeInfo ytShortsTab(AccessibilityNodeInfo root) {
+        Rect screen = new Rect();
+        root.getBoundsInScreen(screen);
+        List<AccessibilityNodeInfo> found = root.findAccessibilityNodeInfosByText("Shorts");
+        if (found == null) return null;
+        for (AccessibilityNodeInfo t : found) {
+            if (t == null || !t.isVisibleToUser()) continue;
+            if (!startsWithLabel(t.getContentDescription(), "Shorts") && !startsWithLabel(t.getText(), "Shorts")) continue;
+            Rect r = new Rect();
+            t.getBoundsInScreen(r);
+            if (r.top < screen.height() * 0.82f) continue;   // solo la barra de abajo
+            AccessibilityNodeInfo c = clickableUp(t);
+            return c != null ? c : t;
+        }
+        return null;
+    }
+
     /**
      * YouTube: ¿estás mirando Shorts? Se reconoce el reproductor de Shorts por su nombre
      * interno y su tamaño (a pantalla completa; los Shorts chiquitos del inicio no cuentan),
@@ -772,6 +794,13 @@ public class LimitService extends AccessibilityService {
         } else {
             tiktokLock1.hide();
             tiktokLock2.hide();
+        }
+        // YouTube con el límite cumplido: candado sobre el botón Shorts de la barra de abajo
+        // (el resto de YouTube queda libre).
+        if (root != null && YT.equals(pkg) && usage.remaining(Kind.REELS) <= 0) {
+            place(shortsLock, ytShortsTab(root), root, true, "Shorts está bloqueado hasta mañana");
+        } else {
+            shortsLock.hide();
         }
         if (root != null && IG.equals(pkg) && usage.remaining(Kind.REELS) <= 0) {
             cover.arm();   // el reloj queda listo para tapar la grilla al instante
