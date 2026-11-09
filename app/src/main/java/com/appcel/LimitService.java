@@ -76,6 +76,7 @@ public class LimitService extends AccessibilityService {
     private Blocker blocker;        // botón Reels (Instagram) o Para ti (X)
     private Blocker searchBlocker;  // botón de la lupa (Instagram): abre el buscador
     private Cover cover;
+    private Blocker tiktokLock1, tiktokLock2;   // candados sobre las pestañas de videos de TikTok
     private Blocker backCatcher;   // zona invisible sobre la flecha de atrás del buscador
     private Blocker profileReelsCatcher;   // zona invisible sobre la pestaña Reels de un perfil (y su flechita)
     private boolean holdingBack;
@@ -183,6 +184,10 @@ public class LimitService extends AccessibilityService {
         AppSettings.setPaused(this, false);   // la pausa desde la app ya no existe
         usage = new Usage(this);
         overlay = new Overlay(this);
+        tiktokLock1 = new Blocker(this, R.drawable.ic_lock,
+                () -> notice("Los videos de TikTok están bloqueados hasta mañana", Overlay.VIOLET));
+        tiktokLock2 = new Blocker(this, R.drawable.ic_lock,
+                () -> notice("Los videos de TikTok están bloqueados hasta mañana", Overlay.VIOLET));
         blocker = new Blocker(this, R.drawable.ic_lock,
                 () -> notice("Reels está bloqueado hasta mañana", Overlay.VIOLET));
         searchBlocker = new Blocker(this, R.drawable.ic_search, this::openInstagramSearch);
@@ -313,6 +318,8 @@ public class LimitService extends AccessibilityService {
         profileReelsCatcher.hide();
         cover.hide();
         cover.disarm();
+        tiktokLock1.hide();
+        tiktokLock2.hide();
         lockNotice.hide();
         centerNotice.hide();
         muteAd(false);
@@ -612,13 +619,106 @@ public class LimitService extends AccessibilityService {
         try {
             if (IG.equals(pkg)) return reelsVisible(root) ? Kind.REELS : Kind.NONE;
             if (X.equals(pkg)) return forYouVisible(root) ? Kind.FOR_YOU : Kind.NONE;
-            // TikTok es todo videos cortos: cuenta mientras esté abierto.
-            if (isTikTok(pkg)) return Kind.REELS;
+            if (isTikTok(pkg)) return tiktokFeedVisible(root) ? Kind.REELS : Kind.NONE;
             if (YT.equals(pkg)) return shortsVisible(root) ? Kind.REELS : Kind.NONE;
         } catch (Exception ignored) {
             // Si la app cambia algo raro en su interfaz, no rompemos el servicio.
         }
         return Kind.NONE;
+    }
+
+    // ------------------------------------------------------------------ TikTok
+
+    private boolean tiktokFeed;          // última vez que se vio la barra: ¿estabas en una pestaña de videos?
+    private long lastTikTokTabsAt;
+    private List<AccessibilityNodeInfo> lastTikTokTabs;
+
+    /**
+     * TikTok: cuenta mientras estás en una pestaña de videos (Inicio y la de al lado). En la
+     * Bandeja de entrada o en tu Perfil no cuenta. Sin la barra de abajo (por ejemplo, un
+     * video abierto desde un perfil) se mantiene lo último que se vio.
+     */
+    private boolean tiktokFeedVisible(AccessibilityNodeInfo root) {
+        List<AccessibilityNodeInfo> tabs = tiktokTabs(root);
+        if (tabs == null) return tiktokFeed;
+        int sel = -1;
+        for (int i = 0; i < tabs.size(); i++) {
+            AccessibilityNodeInfo t = tabs.get(i);
+            if (t.isSelected() || isSelectedDown(t, 3)) { sel = i; break; }
+        }
+        if (sel >= 0) tiktokFeed = sel < tiktokVideoTabs(tabs.size());
+        return tiktokFeed;
+    }
+
+    /** Cuántas pestañas de videos hay al principio de la barra (Inicio y Amigos/Tienda). */
+    private static int tiktokVideoTabs(int n) {
+        return n >= 5 ? 2 : 1;
+    }
+
+    /** La Bandeja de entrada: la anteúltima pestaña (la última es Perfil). */
+    private static int tiktokInboxIndex(int n) {
+        return Math.max(0, n - 2);
+    }
+
+    /**
+     * La barra de abajo de TikTok: una fila de 4 o 5 botones a lo ancho, pegada abajo.
+     * Se reconoce por su forma (TikTok no les pone nombres internos legibles).
+     */
+    private List<AccessibilityNodeInfo> tiktokTabs(AccessibilityNodeInfo root) {
+        long now = SystemClock.elapsedRealtime();
+        if (now - lastTikTokTabsAt < 250 && lastTikTokTabs != null) return lastTikTokTabs.isEmpty() ? null : lastTikTokTabs;
+        lastTikTokTabsAt = now;
+        Rect screen = new Rect();
+        root.getBoundsInScreen(screen);
+        List<AccessibilityNodeInfo> cands = new ArrayList<>();
+        ArrayDeque<AccessibilityNodeInfo> queue = new ArrayDeque<>();
+        queue.add(root);
+        int seen = 0;
+        while (!queue.isEmpty() && seen < 500) {
+            AccessibilityNodeInfo n = queue.poll();
+            seen++;
+            if (n == null || !n.isVisibleToUser()) continue;
+            Rect r = new Rect();
+            n.getBoundsInScreen(r);
+            if (r.bottom < screen.height() * 0.80f) {
+                // Solo bajar por lo que llega a la parte de abajo de la pantalla.
+                if (r.bottom < screen.height() * 0.5f) continue;
+            }
+            if (n.isClickable() && r.top >= screen.height() * 0.84f && r.height() <= screen.height() * 0.12f
+                    && r.width() >= screen.width() * 0.12f && r.width() <= screen.width() * 0.32f) {
+                cands.add(n);
+                continue;
+            }
+            for (int i = 0; i < n.getChildCount(); i++) queue.add(n.getChild(i));
+        }
+        // La fila con más botones a la misma altura.
+        List<AccessibilityNodeInfo> best = null;
+        for (AccessibilityNodeInfo a : cands) {
+            Rect ra = new Rect();
+            a.getBoundsInScreen(ra);
+            List<AccessibilityNodeInfo> row = new ArrayList<>();
+            for (AccessibilityNodeInfo b : cands) {
+                Rect rb = new Rect();
+                b.getBoundsInScreen(rb);
+                if (Math.abs(rb.centerY() - ra.centerY()) <= 20) row.add(b);
+            }
+            if (best == null || row.size() > best.size()) best = row;
+        }
+        List<AccessibilityNodeInfo> result = null;
+        if (best != null && best.size() >= 4 && best.size() <= 6) {
+            best.sort((x, y) -> {
+                Rect rx = new Rect(), ry = new Rect();
+                x.getBoundsInScreen(rx);
+                y.getBoundsInScreen(ry);
+                return Integer.compare(rx.left, ry.left);
+            });
+            Rect first = new Rect(), last = new Rect();
+            best.get(0).getBoundsInScreen(first);
+            best.get(best.size() - 1).getBoundsInScreen(last);
+            if (last.right - first.left >= screen.width() * 0.8f) result = best;
+        }
+        lastTikTokTabs = result == null ? new ArrayList<>() : result;
+        return result;
     }
 
     /**
@@ -656,6 +756,23 @@ public class LimitService extends AccessibilityService {
     private void updateBlocker(AccessibilityNodeInfo root, String pkg) {
         if (root != null && IG.equals(pkg)) updateDmReel(root);
         else dmCatcher.hide();
+        if (root != null && isTikTok(pkg) && usage.remaining(Kind.REELS) <= 0) {
+            // TikTok con el límite cumplido: candado sobre las pestañas de videos (Inicio y la
+            // de al lado). Bandeja de entrada y Perfil quedan libres.
+            List<AccessibilityNodeInfo> tabs = tiktokTabs(root);
+            String msg = "Los videos de TikTok están bloqueados hasta mañana";
+            if (tabs != null) {
+                place(tiktokLock1, tabs.get(0), root, true, msg);
+                if (tiktokVideoTabs(tabs.size()) > 1) place(tiktokLock2, tabs.get(1), root, true, msg);
+                else tiktokLock2.hide();
+            } else {
+                tiktokLock1.hide();
+                tiktokLock2.hide();
+            }
+        } else {
+            tiktokLock1.hide();
+            tiktokLock2.hide();
+        }
         if (root != null && IG.equals(pkg) && usage.remaining(Kind.REELS) <= 0) {
             cover.arm();   // el reloj queda listo para tapar la grilla al instante
             // Con un Reel o la sección Reels abierta, la barra de abajo no está: sin candados.
@@ -2714,9 +2831,19 @@ public class LimitService extends AccessibilityService {
         lastEnforce = now;
         enforceStreak++;
 
-        // TikTok: con el límite cumplido, se cierra (pantalla de inicio del teléfono).
+        // TikTok: con el límite cumplido no se cierra: te lleva a la Bandeja de entrada
+        // (notificaciones y mensajes). Si estás en un video sin la barra de abajo, primero atrás.
         if (k == Kind.REELS && isTikTok(lastPkg)) {
-            performGlobalAction(GLOBAL_ACTION_HOME);
+            AccessibilityNodeInfo r = getRootInActiveWindow();
+            List<AccessibilityNodeInfo> tabs = r == null ? null : tiktokTabs(r);
+            if (tabs != null) {
+                int inbox = tiktokInboxIndex(tabs.size());
+                if (clickUp(tabs.get(inbox)) || clickDown(tabs.get(inbox))) {
+                    tiktokFeed = false;
+                    return;
+                }
+            }
+            performGlobalAction(GLOBAL_ACTION_BACK);
             return;
         }
         // YouTube: salir de Shorts volviendo atrás; si no alcanza, a la pantalla de inicio.
