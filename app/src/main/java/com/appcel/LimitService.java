@@ -27,6 +27,28 @@ public class LimitService extends AccessibilityService {
 
     static final String IG = "com.instagram.android";
     static final String X = "com.twitter.android";
+    // Comparten el límite de Reels: TikTok (sus distintas versiones) y YouTube (solo Shorts).
+    static final String[] TIKTOK = {"com.zhiliaoapp.musically", "com.ss.android.ugc.trill",
+            "com.ss.android.ugc.aweme", "com.zhiliaoapp.musically.go"};
+    static final String YT = "com.google.android.youtube";
+    /** Nombres internos del reproductor de Shorts en YouTube (YouTube los llama "reel"). */
+    static final String[] YT_SHORTS_IDS = {
+            YT + ":id/reel_player_page_container",
+            YT + ":id/reel_recycler",
+            YT + ":id/reel_watch_player",
+            YT + ":id/reel_player_overlay_container",
+    };
+
+    static boolean isTikTok(CharSequence pkg) {
+        if (pkg == null) return false;
+        for (String t : TIKTOK) if (t.contentEquals(pkg)) return true;
+        return false;
+    }
+
+    /** Apps que Limit mira: Instagram, X, TikTok y YouTube. */
+    static boolean isTarget(CharSequence pkg) {
+        return pkg != null && (IG.contentEquals(pkg) || X.contentEquals(pkg) || isTikTok(pkg) || YT.contentEquals(pkg));
+    }
 
     // Solo se buscan estos botones de pestañas; nada más de la pantalla.
     static final String IG_REELS_TAB_ID = IG + ":id/clips_tab";
@@ -184,7 +206,7 @@ public class LimitService extends AccessibilityService {
             checkProfileReels();
             return;
         }
-        boolean target = pkg != null && (IG.contentEquals(pkg) || X.contentEquals(pkg));
+        boolean target = isTarget(pkg);
         if (!target) {
             // Otra app pasó al frente (inicio del teléfono, otra app...): solo se mira
             // cuál app está abierta, para sacar el candado y el contador al instante.
@@ -282,7 +304,7 @@ public class LimitService extends AccessibilityService {
         try {
             AccessibilityNodeInfo root = getRootInActiveWindow();
             CharSequence p = root == null ? null : root.getPackageName();
-            if (p != null && (IG.contentEquals(p) || X.contentEquals(p))) return;
+            if (isTarget(p)) return;
         } catch (Exception ignored) {
         }
         blocker.hide();
@@ -530,8 +552,8 @@ public class LimitService extends AccessibilityService {
             if (remaining <= 0) {
                 // En X la pastillita roja (y después la violeta) la maneja el aviso de cambio.
                 // En la lupa no: ahí ya no se llega a ver nada (el reloj te lleva al Inicio).
-                if (k == Kind.REELS && !"lupa".equals(igSection) && !"busqueda".equals(igSection)
-                        && now >= noticeUntil) {
+                boolean igSearch = IG.equals(lastPkg) && ("lupa".equals(igSection) || "busqueda".equals(igSection));
+                if (k == Kind.REELS && !igSearch && now >= noticeUntil) {
                     notice(k.label + ": límite de hoy alcanzado", Overlay.RED);
                 }
                 enforce(k);
@@ -583,17 +605,51 @@ public class LimitService extends AccessibilityService {
         if (root == null || root.getPackageName() == null) return Kind.NONE;
 
         String pkg = root.getPackageName().toString();
-        if (IG.equals(pkg) || X.equals(pkg)) {
+        if (isTarget(pkg)) {
             lastRoot = root;
             lastPkg = pkg;
         }
         try {
             if (IG.equals(pkg)) return reelsVisible(root) ? Kind.REELS : Kind.NONE;
             if (X.equals(pkg)) return forYouVisible(root) ? Kind.FOR_YOU : Kind.NONE;
+            // TikTok es todo videos cortos: cuenta mientras esté abierto.
+            if (isTikTok(pkg)) return Kind.REELS;
+            if (YT.equals(pkg)) return shortsVisible(root) ? Kind.REELS : Kind.NONE;
         } catch (Exception ignored) {
             // Si la app cambia algo raro en su interfaz, no rompemos el servicio.
         }
         return Kind.NONE;
+    }
+
+    /**
+     * YouTube: ¿estás mirando Shorts? Se reconoce el reproductor de Shorts por su nombre
+     * interno y su tamaño (a pantalla completa; los Shorts chiquitos del inicio no cuentan),
+     * o la pestaña "Shorts" de abajo seleccionada. No se mira el video.
+     */
+    private static boolean shortsVisible(AccessibilityNodeInfo root) {
+        Rect screen = new Rect();
+        root.getBoundsInScreen(screen);
+        for (String id : YT_SHORTS_IDS) {
+            List<AccessibilityNodeInfo> found = root.findAccessibilityNodeInfosByViewId(id);
+            if (found == null) continue;
+            for (AccessibilityNodeInfo n : found) {
+                if (n == null || !n.isVisibleToUser()) continue;
+                Rect r = new Rect();
+                n.getBoundsInScreen(r);
+                if (r.height() >= screen.height() * 0.6f && r.width() >= screen.width() * 0.8f) return true;
+            }
+        }
+        List<AccessibilityNodeInfo> tabs = root.findAccessibilityNodeInfosByText("Shorts");
+        if (tabs != null) for (AccessibilityNodeInfo t : tabs) {
+            if (t == null || !t.isVisibleToUser()) continue;
+            if (!startsWithLabel(t.getContentDescription(), "Shorts") && !startsWithLabel(t.getText(), "Shorts")) continue;
+            Rect r = new Rect();
+            t.getBoundsInScreen(r);
+            // La barra de abajo de YouTube, con "Shorts" elegido.
+            if (r.top >= screen.height() * 0.8f && (t.isSelected() || isSelectedDown(t, 2)
+                    || (t.getParent() != null && t.getParent().isSelected()))) return true;
+        }
+        return false;
     }
 
     /** Pone o saca la tapa con candado sobre el botón de Reels o de Para ti. */
@@ -2657,6 +2713,17 @@ public class LimitService extends AccessibilityService {
         }
         lastEnforce = now;
         enforceStreak++;
+
+        // TikTok: con el límite cumplido, se cierra (pantalla de inicio del teléfono).
+        if (k == Kind.REELS && isTikTok(lastPkg)) {
+            performGlobalAction(GLOBAL_ACTION_HOME);
+            return;
+        }
+        // YouTube: salir de Shorts volviendo atrás; si no alcanza, a la pantalla de inicio.
+        if (k == Kind.REELS && YT.equals(lastPkg)) {
+            performGlobalAction(enforceStreak >= 3 ? GLOBAL_ACTION_HOME : GLOBAL_ACTION_BACK);
+            return;
+        }
 
         // En Instagram, si los intentos suaves no funcionan, vamos a la pantalla de inicio
         // del teléfono. En X nunca: solo se cambia de Para ti a Siguiendo.

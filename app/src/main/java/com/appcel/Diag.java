@@ -85,7 +85,9 @@ final class Diag {
         StringBuilder sb = new StringBuilder();
         sb.append("\n===== ")
                 .append(new SimpleDateFormat("HH:mm:ss", Locale.US).format(new Date()))
-                .append("  app=").append(pkg.equals(LimitService.IG) ? "Instagram" : "X")
+                .append("  app=").append(pkg.equals(LimitService.IG) ? "Instagram"
+                        : pkg.equals(LimitService.X) ? "X"
+                        : pkg.equals(LimitService.YT) ? "YouTube" : "TikTok")
                 .append("  detectado=").append(detected.name())
                 .append(" =====\n");
 
@@ -100,6 +102,11 @@ final class Diag {
                 }
             }
             label(sb, root, LimitService.IG_REELS_LABEL);
+            sb.append("forma de la pantalla (sin textos ni contenido):\n");
+            int[] count = {0};
+            shape(root, 0, sb, count);
+        } else if (!pkg.equals(LimitService.X)) {
+            // TikTok y YouTube: solo la forma de la pantalla.
             sb.append("forma de la pantalla (sin textos ni contenido):\n");
             int[] count = {0};
             shape(root, 0, sb, count);
